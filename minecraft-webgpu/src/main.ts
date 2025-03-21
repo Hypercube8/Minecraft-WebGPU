@@ -16,8 +16,16 @@ async function main(): Promise<void> {
   });
 
   const module: GPUShaderModule = device.createShaderModule({
-    label: 'our hardcoded red triangle shader',
-    code: `
+    label: 'hardcoded triangle',
+    code: /* wgsl */`
+      struct OurStruct {
+        color: vec4f,
+        scale: vec2f,
+        offset: vec2f
+      };
+
+      @group(0) @binding(0) var<uniform> ourStruct: OurStruct;
+
       @vertex fn vs(
         @builtin(vertex_index) vertexIndex : u32
       ) -> @builtin(position) vec4f {
@@ -27,28 +35,87 @@ async function main(): Promise<void> {
           vec2f( 0.5, -0.5),
         );
 
-        return vec4f(pos[vertexIndex], 0.0, 1.0);
+        return vec4f(
+          pos[vertexIndex] * ourStruct.scale + ourStruct.offset, 0.0, 1.0);
       }
 
       @fragment fn fs() -> @location(0) vec4f {
-        return vec4f(1.0, 0.0, 0.0, 1.0);
+        return ourStruct.color;
       }
-    `
+  `
   });
 
   const pipeline: GPURenderPipeline = device.createRenderPipeline({
-    label: "our hardcoded red triangle pipeline",
+    label: "hardcoded triangles pipeline",
     layout: "auto",
     vertex: {
-      entryPoint: "vs",
       module
     },
     fragment: {
-      entryPoint: "fs",
       module,
       targets: [{ format: presentationFormat }]
     }
   });
+
+  type RandomFunction = (min?: number, max?: number) => number;
+  const rand: RandomFunction = (min?, max?) => {
+    if (min == undefined) {
+      min = 0;
+      max = 1;
+    } else if (max == undefined) {
+      max = min;
+      min = 0;
+    }
+    return min + Math.random() * (max - min);
+  }; 
+
+  const uniformBufferSize: number = 
+    4 * 4 +
+    2 * 4 +
+    2 * 4;
+
+  const kColorOffset: number = 0;
+  const kScaleOffset: number = 4;
+  const kOffsetOffset: number = 6;
+
+  const kNumObjects: number = 100;
+
+  interface ObjectInfo {
+    scale: number;
+    uniformBuffer: GPUBuffer;
+    uniformValues: Float32Array;
+    bindGroup: GPUBindGroup; 
+  }
+
+  const objectInfos: ObjectInfo[] = [];
+
+  for (let i = 0; i < kNumObjects; i++) {
+    const uniformBuffer: GPUBuffer = device.createBuffer({
+      label: `uniforms for obj ${i}`,
+      size: uniformBufferSize,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+    }); 
+
+    const uniformValues: Float32Array = new Float32Array(uniformBufferSize / 4);
+
+    uniformValues.set([rand(), rand(), rand(), 1], kColorOffset);
+    uniformValues.set([rand(-0.9, 0.9), rand(-0.9, 0.9)], kOffsetOffset);
+
+    const bindGroup: GPUBindGroup = device.createBindGroup({
+      label: `bind group for obj ${i}`,
+      layout: pipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: uniformBuffer }}
+      ]
+    });
+
+    objectInfos.push({
+      scale: rand(0.2, 0.5),
+      uniformBuffer,
+      uniformValues,
+      bindGroup
+    });
+  }
 
   const renderPassDescriptor: GPURenderPassDescriptor = {
     label: "our basic canvas renderPass",
@@ -67,9 +134,17 @@ async function main(): Promise<void> {
 
     const encoder: GPUCommandEncoder = device!.createCommandEncoder({ label: "our encoder" });
     
-    const pass = encoder.beginRenderPass(renderPassDescriptor);
+    const pass: GPURenderPassEncoder = encoder.beginRenderPass(renderPassDescriptor);
     pass.setPipeline(pipeline);
-    pass.draw(3);
+
+    const aspect = canvas!.width / canvas!.height;
+
+    for (const {scale, bindGroup, uniformBuffer, uniformValues} of objectInfos) {
+      uniformValues.set([scale / aspect, scale], kScaleOffset);
+      device!.queue.writeBuffer(uniformBuffer, 0, uniformValues);
+      pass.setBindGroup(0, bindGroup);
+      pass.draw(3);
+    }
     pass.end();
 
     const commandBuffer: GPUCommandBuffer = encoder.finish();
