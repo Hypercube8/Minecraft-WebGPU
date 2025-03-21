@@ -20,11 +20,15 @@ async function main(): Promise<void> {
     code: /* wgsl */`
       struct OurStruct {
         color: vec4f,
-        scale: vec2f,
         offset: vec2f
       };
 
+      struct OtherStruct {
+        scale: vec2f
+      }
+
       @group(0) @binding(0) var<uniform> ourStruct: OurStruct;
+      @group(0) @binding(1) var<uniform> otherStruct: OtherStruct;
 
       @vertex fn vs(
         @builtin(vertex_index) vertexIndex : u32
@@ -36,7 +40,7 @@ async function main(): Promise<void> {
         );
 
         return vec4f(
-          pos[vertexIndex] * ourStruct.scale + ourStruct.offset, 0.0, 1.0);
+          pos[vertexIndex] * otherStruct.scale + ourStruct.offset, 0.0, 1.0);
       }
 
       @fragment fn fs() -> @location(0) vec4f {
@@ -69,14 +73,16 @@ async function main(): Promise<void> {
     return min + Math.random() * (max - min);
   }; 
 
-  const uniformBufferSize: number = 
+  const staticUniformBufferSize: number = 
     4 * 4 +
     2 * 4 +
     2 * 4;
+  const uniformBufferSize: number = 
+    2 * 4;
 
   const kColorOffset: number = 0;
-  const kScaleOffset: number = 4;
-  const kOffsetOffset: number = 6;
+  const kScaleOffset: number = 0;
+  const kOffsetOffset: number = 4;
 
   const kNumObjects: number = 100;
 
@@ -90,22 +96,34 @@ async function main(): Promise<void> {
   const objectInfos: ObjectInfo[] = [];
 
   for (let i = 0; i < kNumObjects; i++) {
-    const uniformBuffer: GPUBuffer = device.createBuffer({
+    const staticUniformBuffer: GPUBuffer = device.createBuffer({
       label: `uniforms for obj ${i}`,
-      size: uniformBufferSize,
+      size: staticUniformBufferSize,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
     }); 
 
-    const uniformValues: Float32Array = new Float32Array(uniformBufferSize / 4);
+    {
+      const uniformValues: Float32Array = new Float32Array(staticUniformBufferSize / 4);
 
-    uniformValues.set([rand(), rand(), rand(), 1], kColorOffset);
-    uniformValues.set([rand(-0.9, 0.9), rand(-0.9, 0.9)], kOffsetOffset);
+      uniformValues.set([rand(), rand(), rand(), 1], kColorOffset);
+      uniformValues.set([rand(-0.9, 0.9), rand(-0.9, 0.9)], kOffsetOffset);
+
+      device!.queue.writeBuffer(staticUniformBuffer, 0, uniformValues);
+    }
+
+    const uniformValues: Float32Array = new Float32Array(uniformBufferSize / 4);
+    const uniformBuffer: GPUBuffer = device.createBuffer({
+      label: 'changing uniforms for obj: ${i}',
+      size: uniformBufferSize,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+    });
 
     const bindGroup: GPUBindGroup = device.createBindGroup({
       label: `bind group for obj ${i}`,
       layout: pipeline.getBindGroupLayout(0),
       entries: [
-        { binding: 0, resource: { buffer: uniformBuffer }}
+        { binding: 0, resource: { buffer: staticUniformBuffer }},
+        { binding: 1, resource: { buffer: uniformBuffer }}
       ]
     });
 
