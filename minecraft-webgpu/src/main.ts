@@ -27,24 +27,36 @@ async function main(): Promise<void> {
         scale: vec2f
       }
 
-      @group(0) @binding(0) var<uniform> ourStruct: OurStruct;
-      @group(0) @binding(1) var<uniform> otherStruct: OtherStruct;
+      struct VSOutput {
+        @builtin(position) position: vec4f,
+        @location(0) color: vec4f
+      }
+
+      @group(0) @binding(0) var<storage, read> ourStructs: array<OurStruct>;
+      @group(0) @binding(1) var<storage, read> otherStructs: array<OtherStruct>;
 
       @vertex fn vs(
-        @builtin(vertex_index) vertexIndex : u32
-      ) -> @builtin(position) vec4f {
+        @builtin(vertex_index) vertexIndex: u32,
+        @builtin(instance_index) instanceIndex : u32
+      ) -> VSOutput {
         let pos = array(
           vec2f( 0.0, 0.5),
           vec2f(-0.5, -0.5),
           vec2f( 0.5, -0.5),
         );
 
-        return vec4f(
+        let otherStruct = otherStructs[instanceIndex];
+        let ourStruct = ourStructs[instanceIndex];
+
+        var vsOut: VSOutput;
+        vsOut.position = vec4f(
           pos[vertexIndex] * otherStruct.scale + ourStruct.offset, 0.0, 1.0);
+        vsOut.color = ourStruct.color;
+        return vsOut;
       }
 
-      @fragment fn fs() -> @location(0) vec4f {
-        return ourStruct.color;
+      @fragment fn fs(vsOut: VSOutput) -> @location(0) vec4f {
+        return vsOut.color;
       }
   `
   });
@@ -73,67 +85,66 @@ async function main(): Promise<void> {
     return min + Math.random() * (max - min);
   }; 
 
-  const staticUniformBufferSize: number = 
-    4 * 4 +
-    2 * 4 +
-    2 * 4;
-  const uniformBufferSize: number = 
-    2 * 4;
-
-  const kColorOffset: number = 0;
-  const kScaleOffset: number = 0;
-  const kOffsetOffset: number = 4;
-
   const kNumObjects: number = 100;
 
   interface ObjectInfo {
-    scale: number;
-    uniformBuffer: GPUBuffer;
-    uniformValues: Float32Array;
-    bindGroup: GPUBindGroup; 
+    scale: number; 
   }
 
   const objectInfos: ObjectInfo[] = [];
 
-  for (let i = 0; i < kNumObjects; i++) {
-    const staticUniformBuffer: GPUBuffer = device.createBuffer({
-      label: `uniforms for obj ${i}`,
-      size: staticUniformBufferSize,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
-    }); 
+  const staticUnitSize: number =
+    4 * 4 +
+    2 * 4 +
+    2 * 4;
+  const changingUnitSize: number = 
+    2 * 4;
+  
+  const staticStorageBufferSize: number = staticUnitSize * kNumObjects;
+  const changingStorageBufferSize: number = changingUnitSize * kNumObjects;
+  
+  const staticStorageBuffer: GPUBuffer = device!.createBuffer({
+    label: "static storage for objects",
+    size: staticStorageBufferSize,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+  });
 
-    {
-      const uniformValues: Float32Array = new Float32Array(staticUniformBufferSize / 4);
+  const changingStorageBuffer: GPUBuffer = device!.createBuffer({
+    label: "changing storage for objects",
+    size: changingStorageBufferSize,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+  });
 
-      uniformValues.set([rand(), rand(), rand(), 1], kColorOffset);
-      uniformValues.set([rand(-0.9, 0.9), rand(-0.9, 0.9)], kOffsetOffset);
+  const kColorOffset: number = 0;
+  const kOffsetOffset: number = 4;
 
-      device!.queue.writeBuffer(staticUniformBuffer, 0, uniformValues);
+  const kScaleOffset: number = 0;
+
+  {
+    const staticStorageValues: Float32Array = new Float32Array(staticStorageBufferSize / 4);
+    for (let i = 0; i < kNumObjects; i++) {
+      const staticOffset = i * (staticUnitSize / 4);
+
+      staticStorageValues.set([rand(), rand(), rand()], staticOffset + kColorOffset);
+      staticStorageValues.set([rand(-0.9, 0.9), rand(-0.9, 0.9)], staticOffset + kOffsetOffset);
+
+      objectInfos.push({
+        scale: rand(0.2, 0.5)
+      });
     }
-
-    const uniformValues: Float32Array = new Float32Array(uniformBufferSize / 4);
-    const uniformBuffer: GPUBuffer = device.createBuffer({
-      label: 'changing uniforms for obj: ${i}',
-      size: uniformBufferSize,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
-    });
-
-    const bindGroup: GPUBindGroup = device.createBindGroup({
-      label: `bind group for obj ${i}`,
-      layout: pipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: staticUniformBuffer }},
-        { binding: 1, resource: { buffer: uniformBuffer }}
-      ]
-    });
-
-    objectInfos.push({
-      scale: rand(0.2, 0.5),
-      uniformBuffer,
-      uniformValues,
-      bindGroup
-    });
+    device!.queue.writeBuffer(staticStorageBuffer, 0, staticStorageValues);
   }
+
+  const storageValues: Float32Array = new Float32Array(changingStorageBufferSize / 4);
+
+  const bindGroup: GPUBindGroup = device!.createBindGroup({
+    label: "bind group for objects",
+    layout: pipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: staticStorageBuffer }},
+      { binding: 1, resource: { buffer: changingStorageBuffer }}
+    ]
+  });
 
   const renderPassDescriptor: GPURenderPassDescriptor = {
     label: "our basic canvas renderPass",
@@ -157,12 +168,15 @@ async function main(): Promise<void> {
 
     const aspect = canvas!.width / canvas!.height;
 
-    for (const {scale, bindGroup, uniformBuffer, uniformValues} of objectInfos) {
-      uniformValues.set([scale / aspect, scale], kScaleOffset);
-      device!.queue.writeBuffer(uniformBuffer, 0, uniformValues);
-      pass.setBindGroup(0, bindGroup);
-      pass.draw(3);
-    }
+    objectInfos.forEach((info: ObjectInfo, ndx: number) => {
+      const offset = ndx * (changingUnitSize / 4)
+      storageValues.set([info.scale / aspect, info.scale], offset + kScaleOffset);
+    });    
+    device!.queue.writeBuffer(changingStorageBuffer, 0, storageValues);
+
+    pass.setBindGroup(0, bindGroup);
+    pass.draw(3, kNumObjects);
+
     pass.end();
 
     const commandBuffer: GPUCommandBuffer = encoder.finish();
