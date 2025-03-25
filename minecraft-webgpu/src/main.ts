@@ -27,6 +27,10 @@ async function main(): Promise<void> {
         scale: vec2f
       }
 
+      struct Vertex {
+        position: vec2f
+      }
+
       struct VSOutput {
         @builtin(position) position: vec4f,
         @location(0) color: vec4f
@@ -34,23 +38,18 @@ async function main(): Promise<void> {
 
       @group(0) @binding(0) var<storage, read> ourStructs: array<OurStruct>;
       @group(0) @binding(1) var<storage, read> otherStructs: array<OtherStruct>;
+      @group(0) @binding(2) var<storage, read> pos: array<Vertex>;
 
       @vertex fn vs(
         @builtin(vertex_index) vertexIndex: u32,
         @builtin(instance_index) instanceIndex : u32
       ) -> VSOutput {
-        let pos = array(
-          vec2f( 0.0, 0.5),
-          vec2f(-0.5, -0.5),
-          vec2f( 0.5, -0.5),
-        );
-
         let otherStruct = otherStructs[instanceIndex];
         let ourStruct = ourStructs[instanceIndex];
 
         var vsOut: VSOutput;
         vsOut.position = vec4f(
-          pos[vertexIndex] * otherStruct.scale + ourStruct.offset, 0.0, 1.0);
+          pos[vertexIndex].position * otherStruct.scale + ourStruct.offset, 0.0, 1.0);
         vsOut.color = ourStruct.color;
         return vsOut;
       }
@@ -72,6 +71,50 @@ async function main(): Promise<void> {
       targets: [{ format: presentationFormat }]
     }
   });
+
+  interface Circle {
+    radius: number;
+    numSubdivisions: number;
+    innerRadius: number;
+    startAngle: number;
+    endAngle: number;
+  }
+
+  function createCircleVerticies(circle: Circle): {vertexData: Float32Array, numVerticies: number} {
+    const numVerticies: number = circle.numSubdivisions * 3 * 2;
+
+    const vertexData: Float32Array = new Float32Array(circle.numSubdivisions * 2 * 3 * 2);
+
+    let offset: number = 0;
+    
+    const addVertex = (x: number, y: number) => {
+      vertexData[offset++] = x;
+      vertexData[offset++] = y;
+    };
+
+    for (let i = 0; i < circle.numSubdivisions; ++i) {
+      const angle1: number = circle.startAngle + (i+0) * (circle.endAngle - circle.startAngle) / circle.numSubdivisions;
+      const angle2: number = circle.startAngle + (i+1) * (circle.endAngle - circle.startAngle) / circle.numSubdivisions;
+
+      const c1: number = Math.cos(angle1);
+      const s1: number = Math.sin(angle1);
+      const c2: number = Math.cos(angle2);
+      const s2: number = Math.sin(angle2);
+
+      addVertex(c1 * circle.radius, s1 * circle.radius);
+      addVertex(c2 * circle.radius, s2 * circle.radius);
+      addVertex(c1 * circle.innerRadius, s1 * circle.innerRadius);
+
+      addVertex(c1 * circle.innerRadius, s1 * circle.innerRadius);
+      addVertex(c2 * circle.radius, s2 * circle.radius);
+      addVertex(c2 * circle.innerRadius, s2 * circle.innerRadius);
+    }
+
+    return {
+      vertexData,
+      numVerticies
+    }
+  }
 
   type RandomFunction = (min?: number, max?: number) => number;
   const rand: RandomFunction = (min?, max?) => {
@@ -137,12 +180,28 @@ async function main(): Promise<void> {
 
   const storageValues: Float32Array = new Float32Array(changingStorageBufferSize / 4);
 
+  const { vertexData, numVerticies } = createCircleVerticies({
+    radius: 0.5,
+    numSubdivisions: 24,
+    innerRadius: 0.25,
+    startAngle: 0,
+    endAngle: Math.PI * 2
+  });
+
+  const vertexStorageBuffer = device!.createBuffer({
+    label: "storage buffer verticies",
+    size: vertexData.byteLength,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+  });
+  device!.queue.writeBuffer(vertexStorageBuffer, 0, vertexData);
+
   const bindGroup: GPUBindGroup = device!.createBindGroup({
     label: "bind group for objects",
     layout: pipeline.getBindGroupLayout(0),
     entries: [
       { binding: 0, resource: { buffer: staticStorageBuffer }},
-      { binding: 1, resource: { buffer: changingStorageBuffer }}
+      { binding: 1, resource: { buffer: changingStorageBuffer }},
+      { binding: 2, resource: { buffer: vertexStorageBuffer }}
     ]
   });
 
@@ -175,7 +234,7 @@ async function main(): Promise<void> {
     device!.queue.writeBuffer(changingStorageBuffer, 0, storageValues);
 
     pass.setBindGroup(0, bindGroup);
-    pass.draw(3, kNumObjects);
+    pass.draw(numVerticies, kNumObjects);
 
     pass.end();
 
