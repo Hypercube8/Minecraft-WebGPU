@@ -91,8 +91,8 @@ async function main(): Promise<void> {
     endAngle: number;
   }
 
-  function createCircleVerticies(circle: Circle): {vertexData: Float32Array, numVerticies: number} {
-    const numVerticies: number = circle.numSubdivisions * 3 * 2;
+  function createCircleVerticies(circle: Circle): {vertexData: Float32Array, indexData: Uint32Array, numVerticies: number} {
+    const numVerticies: number = (circle.numSubdivisions + 1) * 2;
 
     const vertexData: Float32Array = new Float32Array(numVerticies * (2 + 1));
     const colorData: Uint8Array = new Uint8Array(vertexData.buffer);
@@ -114,27 +114,36 @@ async function main(): Promise<void> {
     const innerColor: Color = [1, 1, 1];
     const outerColor: Color = [0.1, 0.1, 0.1]; 
 
-    for (let i = 0; i < circle.numSubdivisions; ++i) {
-      const angle1: number = circle.startAngle + (i+0) * (circle.endAngle - circle.startAngle) / circle.numSubdivisions;
-      const angle2: number = circle.startAngle + (i+1) * (circle.endAngle - circle.startAngle) / circle.numSubdivisions;
-
-      const c1: number = Math.cos(angle1);
-      const s1: number = Math.sin(angle1);
-      const c2: number = Math.cos(angle2);
-      const s2: number = Math.sin(angle2);
+    for (let i = 0; i <= circle.numSubdivisions; ++i) {
+      const angle: number = circle.startAngle + (i+0) * (circle.endAngle - circle.startAngle) / circle.numSubdivisions;
+      
+      const c1: number = Math.cos(angle);
+      const s1: number = Math.sin(angle);
 
       addVertex(c1 * circle.radius, s1 * circle.radius, ...outerColor);
-      addVertex(c2 * circle.radius, s2 * circle.radius, ...outerColor);
       addVertex(c1 * circle.innerRadius, s1 * circle.innerRadius, ...innerColor);
+    } 
 
-      addVertex(c1 * circle.innerRadius, s1 * circle.innerRadius, ...innerColor);
-      addVertex(c2 * circle.radius, s2 * circle.radius, ...outerColor);
-      addVertex(c2 * circle.innerRadius, s2 * circle.innerRadius, ...innerColor);
+    const indexData: Uint32Array = new Uint32Array(circle.numSubdivisions * 6);
+    let ndx: number = 0;
+
+    for (let i = 0; i < circle.numSubdivisions; ++i) {
+      const ndxOffset: number = i * 2;
+
+      indexData[ndx++] = ndxOffset;
+      indexData[ndx++] = ndxOffset+1;
+      indexData[ndx++] = ndxOffset+2;
+
+      indexData[ndx++] = ndxOffset+2;
+      indexData[ndx++] = ndxOffset+1;
+      indexData[ndx++] = ndxOffset+3;
     }
+
 
     return {
       vertexData,
-      numVerticies
+      indexData,
+      numVerticies: indexData.length
     }
   }
 
@@ -207,7 +216,7 @@ async function main(): Promise<void> {
 
   const vertexValues: Float32Array = new Float32Array(changingVertexBufferSize / 4);
 
-  const { vertexData, numVerticies } = createCircleVerticies({
+  const { vertexData, indexData, numVerticies } = createCircleVerticies({
     radius: 0.5,
     numSubdivisions: 24,
     innerRadius: 0.25,
@@ -215,12 +224,19 @@ async function main(): Promise<void> {
     endAngle: Math.PI * 2
   });
 
-  const vertexBuffer = device!.createBuffer({
-    label: "vertex buffer verticies",
+  const vertexBuffer: GPUBuffer = device!.createBuffer({
+    label: "vertex buffer",
     size: vertexData.byteLength,
     usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
   });
   device!.queue.writeBuffer(vertexBuffer, 0, vertexData);
+
+  const indexBuffer: GPUBuffer = device!.createBuffer({
+    label: "index buffer",
+    size: indexData.byteLength,
+    usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST
+  });
+  device!.queue.writeBuffer(indexBuffer, 0, indexData);
 
   const renderPassDescriptor: GPURenderPassDescriptor = {
     label: "our basic canvas renderPass",
@@ -244,6 +260,7 @@ async function main(): Promise<void> {
     pass.setVertexBuffer(0, vertexBuffer);
     pass.setVertexBuffer(1, staticVertexBuffer);
     pass.setVertexBuffer(2, changingVertexBuffer);
+    pass.setIndexBuffer(indexBuffer, "uint32");
 
     const aspect = canvas!.width / canvas!.height;
 
@@ -253,7 +270,7 @@ async function main(): Promise<void> {
     });    
     device!.queue.writeBuffer(changingVertexBuffer, 0, vertexValues);
 
-    pass.draw(numVerticies, kNumObjects);
+    pass.drawIndexed(numVerticies, kNumObjects);
 
     pass.end();
 
