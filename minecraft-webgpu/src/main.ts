@@ -22,7 +22,8 @@ async function main(): Promise<void> {
         @location(0) position: vec2f,
         @location(1) color: vec4f,
         @location(2) offset: vec2f,
-        @location(3) scale: vec2f
+        @location(3) scale: vec2f,
+        @location(4) perVertexColor: vec3f
       }
 
       struct VSOutput {
@@ -36,7 +37,7 @@ async function main(): Promise<void> {
         var vsOut: VSOutput;
         vsOut.position = vec4f(
           vert.position * vert.scale + vert.offset, 0.0, 1.0);
-        vsOut.color = vert.color;
+        vsOut.color = vert.color * vec4f(vert.perVertexColor, 1);
         return vsOut;
       }
 
@@ -53,9 +54,10 @@ async function main(): Promise<void> {
       module,
       buffers: [
         {
-          arrayStride: 2 * 4,
+          arrayStride: 5 * 4,
           attributes: [
-            {shaderLocation: 0, offset: 0, format: "float32x2"}
+            {shaderLocation: 0, offset: 0, format: "float32x2"},
+            {shaderLocation: 4, offset: 8, format: "float32x3"}
           ]
         },
         {
@@ -92,14 +94,21 @@ async function main(): Promise<void> {
   function createCircleVerticies(circle: Circle): {vertexData: Float32Array, numVerticies: number} {
     const numVerticies: number = circle.numSubdivisions * 3 * 2;
 
-    const vertexData: Float32Array = new Float32Array(circle.numSubdivisions * 2 * 3 * 2);
+    const vertexData: Float32Array = new Float32Array(numVerticies * (2 + 3));
 
     let offset: number = 0;
     
-    const addVertex = (x: number, y: number) => {
+    const addVertex = (x: number, y: number, r: number, g: number, b: number) => {
       vertexData[offset++] = x;
       vertexData[offset++] = y;
+      vertexData[offset++] = r;
+      vertexData[offset++] = g;
+      vertexData[offset++] = b;
     };
+
+    type Color = [number, number, number];
+    const innerColor: Color = [1, 1, 1];
+    const outerColor: Color = [0.1, 0.1, 0.1]; 
 
     for (let i = 0; i < circle.numSubdivisions; ++i) {
       const angle1: number = circle.startAngle + (i+0) * (circle.endAngle - circle.startAngle) / circle.numSubdivisions;
@@ -110,13 +119,13 @@ async function main(): Promise<void> {
       const c2: number = Math.cos(angle2);
       const s2: number = Math.sin(angle2);
 
-      addVertex(c1 * circle.radius, s1 * circle.radius);
-      addVertex(c2 * circle.radius, s2 * circle.radius);
-      addVertex(c1 * circle.innerRadius, s1 * circle.innerRadius);
+      addVertex(c1 * circle.radius, s1 * circle.radius, ...outerColor);
+      addVertex(c2 * circle.radius, s2 * circle.radius, ...outerColor);
+      addVertex(c1 * circle.innerRadius, s1 * circle.innerRadius, ...innerColor);
 
-      addVertex(c1 * circle.innerRadius, s1 * circle.innerRadius);
-      addVertex(c2 * circle.radius, s2 * circle.radius);
-      addVertex(c2 * circle.innerRadius, s2 * circle.innerRadius);
+      addVertex(c1 * circle.innerRadius, s1 * circle.innerRadius, ...innerColor);
+      addVertex(c2 * circle.radius, s2 * circle.radius, ...outerColor);
+      addVertex(c2 * circle.innerRadius, s2 * circle.innerRadius, ...innerColor);
     }
 
     return {
