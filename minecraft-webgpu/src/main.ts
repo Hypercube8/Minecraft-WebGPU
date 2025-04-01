@@ -18,17 +18,11 @@ async function main(): Promise<void> {
   const module: GPUShaderModule = device.createShaderModule({
     label: 'hardcoded triangle',
     code: /* wgsl */`
-      struct OurStruct {
-        color: vec4f,
-        offset: vec2f
-      };
-
-      struct OtherStruct {
-        scale: vec2f
-      }
-
       struct Vertex {
-        @location(0) position: vec2f
+        @location(0) position: vec2f,
+        @location(1) color: vec4f,
+        @location(2) offset: vec2f,
+        @location(3) scale: vec2f
       }
 
       struct VSOutput {
@@ -36,20 +30,13 @@ async function main(): Promise<void> {
         @location(0) color: vec4f
       }
 
-      @group(0) @binding(0) var<storage, read> ourStructs: array<OurStruct>;
-      @group(0) @binding(1) var<storage, read> otherStructs: array<OtherStruct>;
-
       @vertex fn vs(
-        vert: Vertex,
-        @builtin(instance_index) instanceIndex : u32
+        vert: Vertex
       ) -> VSOutput {
-        let otherStruct = otherStructs[instanceIndex];
-        let ourStruct = ourStructs[instanceIndex];
-
         var vsOut: VSOutput;
         vsOut.position = vec4f(
-          vert.position * otherStruct.scale + ourStruct.offset, 0.0, 1.0);
-        vsOut.color = ourStruct.color;
+          vert.position * vert.scale + vert.offset, 0.0, 1.0);
+        vsOut.color = vert.color;
         return vsOut;
       }
 
@@ -69,6 +56,21 @@ async function main(): Promise<void> {
           arrayStride: 2 * 4,
           attributes: [
             {shaderLocation: 0, offset: 0, format: "float32x2"}
+          ]
+        },
+        {
+          arrayStride: 6 * 4,
+          stepMode: "instance",
+          attributes: [
+            {shaderLocation: 1, offset: 0, format: "float32x4"},
+            {shaderLocation: 2, offset: 16, format: "float32x2"}
+          ]
+        },
+        {
+          arrayStride: 2 * 4,
+          stepMode: "instance",
+          attributes: [
+            {shaderLocation: 3, offset: 0, format: "float32x2"}
           ]
         }
       ]
@@ -145,24 +147,23 @@ async function main(): Promise<void> {
 
   const staticUnitSize: number =
     4 * 4 +
-    2 * 4 +
     2 * 4;
   const changingUnitSize: number = 
     2 * 4;
   
-  const staticStorageBufferSize: number = staticUnitSize * kNumObjects;
-  const changingStorageBufferSize: number = changingUnitSize * kNumObjects;
+  const staticVertexBufferSize: number = staticUnitSize * kNumObjects;
+  const changingVertexBufferSize: number = changingUnitSize * kNumObjects;
   
-  const staticStorageBuffer: GPUBuffer = device!.createBuffer({
-    label: "static storage for objects",
-    size: staticStorageBufferSize,
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+  const staticVertexBuffer: GPUBuffer = device!.createBuffer({
+    label: "static vertex for objects",
+    size: staticVertexBufferSize,
+    usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
   });
 
-  const changingStorageBuffer: GPUBuffer = device!.createBuffer({
-    label: "changing storage for objects",
-    size: changingStorageBufferSize,
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+  const changingVertexBuffer: GPUBuffer = device!.createBuffer({
+    label: "changing vertex for objects",
+    size: changingVertexBufferSize,
+    usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
   });
 
   const kColorOffset: number = 0;
@@ -171,21 +172,21 @@ async function main(): Promise<void> {
   const kScaleOffset: number = 0;
 
   {
-    const staticStorageValues: Float32Array = new Float32Array(staticStorageBufferSize / 4);
+    const staticVertexValues: Float32Array = new Float32Array(staticVertexBufferSize / 4);
     for (let i = 0; i < kNumObjects; i++) {
       const staticOffset = i * (staticUnitSize / 4);
 
-      staticStorageValues.set([rand(), rand(), rand()], staticOffset + kColorOffset);
-      staticStorageValues.set([rand(-0.9, 0.9), rand(-0.9, 0.9)], staticOffset + kOffsetOffset);
+      staticVertexValues.set([rand(), rand(), rand()], staticOffset + kColorOffset);
+      staticVertexValues.set([rand(-0.9, 0.9), rand(-0.9, 0.9)], staticOffset + kOffsetOffset);
 
       objectInfos.push({
         scale: rand(0.2, 0.5)
       });
     }
-    device!.queue.writeBuffer(staticStorageBuffer, 0, staticStorageValues);
+    device!.queue.writeBuffer(staticVertexBuffer, 0, staticVertexValues);
   }
 
-  const storageValues: Float32Array = new Float32Array(changingStorageBufferSize / 4);
+  const vertexValues: Float32Array = new Float32Array(changingVertexBufferSize / 4);
 
   const { vertexData, numVerticies } = createCircleVerticies({
     radius: 0.5,
@@ -201,15 +202,6 @@ async function main(): Promise<void> {
     usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
   });
   device!.queue.writeBuffer(vertexBuffer, 0, vertexData);
-
-  const bindGroup: GPUBindGroup = device!.createBindGroup({
-    label: "bind group for objects",
-    layout: pipeline.getBindGroupLayout(0),
-    entries: [
-      { binding: 0, resource: { buffer: staticStorageBuffer }},
-      { binding: 1, resource: { buffer: changingStorageBuffer }}
-    ]
-  });
 
   const renderPassDescriptor: GPURenderPassDescriptor = {
     label: "our basic canvas renderPass",
@@ -231,16 +223,17 @@ async function main(): Promise<void> {
     const pass: GPURenderPassEncoder = encoder.beginRenderPass(renderPassDescriptor);
     pass.setPipeline(pipeline);
     pass.setVertexBuffer(0, vertexBuffer);
+    pass.setVertexBuffer(1, staticVertexBuffer);
+    pass.setVertexBuffer(2, changingVertexBuffer);
 
     const aspect = canvas!.width / canvas!.height;
 
     objectInfos.forEach((info: ObjectInfo, ndx: number) => {
       const offset = ndx * (changingUnitSize / 4)
-      storageValues.set([info.scale / aspect, info.scale], offset + kScaleOffset);
+      vertexValues.set([info.scale / aspect, info.scale], offset + kScaleOffset);
     });    
-    device!.queue.writeBuffer(changingStorageBuffer, 0, storageValues);
+    device!.queue.writeBuffer(changingVertexBuffer, 0, vertexValues);
 
-    pass.setBindGroup(0, bindGroup);
     pass.draw(numVerticies, kNumObjects);
 
     pass.end();
