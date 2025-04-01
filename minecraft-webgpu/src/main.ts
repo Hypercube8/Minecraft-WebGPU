@@ -23,7 +23,7 @@ async function main(): Promise<void> {
         @location(1) color: vec4f,
         @location(2) offset: vec2f,
         @location(3) scale: vec2f,
-        @location(4) perVertexColor: vec3f
+        @location(4) perVertexColor: vec4f
       }
 
       struct VSOutput {
@@ -37,7 +37,7 @@ async function main(): Promise<void> {
         var vsOut: VSOutput;
         vsOut.position = vec4f(
           vert.position * vert.scale + vert.offset, 0.0, 1.0);
-        vsOut.color = vert.color * vec4f(vert.perVertexColor, 1);
+        vsOut.color = vert.color * vert.perVertexColor;
         return vsOut;
       }
 
@@ -54,18 +54,18 @@ async function main(): Promise<void> {
       module,
       buffers: [
         {
-          arrayStride: 5 * 4,
+          arrayStride: 2 * 4 + 4,
           attributes: [
             {shaderLocation: 0, offset: 0, format: "float32x2"},
-            {shaderLocation: 4, offset: 8, format: "float32x3"}
+            {shaderLocation: 4, offset: 8, format: "unorm8x4"}
           ]
         },
         {
-          arrayStride: 6 * 4,
+          arrayStride: 4 + 2 * 4,
           stepMode: "instance",
           attributes: [
-            {shaderLocation: 1, offset: 0, format: "float32x4"},
-            {shaderLocation: 2, offset: 16, format: "float32x2"}
+            {shaderLocation: 1, offset: 0, format: "unorm8x4"},
+            {shaderLocation: 2, offset: 4, format: "float32x2"}
           ]
         },
         {
@@ -94,16 +94,20 @@ async function main(): Promise<void> {
   function createCircleVerticies(circle: Circle): {vertexData: Float32Array, numVerticies: number} {
     const numVerticies: number = circle.numSubdivisions * 3 * 2;
 
-    const vertexData: Float32Array = new Float32Array(numVerticies * (2 + 3));
+    const vertexData: Float32Array = new Float32Array(numVerticies * (2 + 1));
+    const colorData: Uint8Array = new Uint8Array(vertexData.buffer);
 
     let offset: number = 0;
+    let colorOffset: number = 8;
     
     const addVertex = (x: number, y: number, r: number, g: number, b: number) => {
       vertexData[offset++] = x;
       vertexData[offset++] = y;
-      vertexData[offset++] = r;
-      vertexData[offset++] = g;
-      vertexData[offset++] = b;
+      offset++;
+      colorData[colorOffset++] = r * 255;
+      colorData[colorOffset++] = g * 255;
+      colorData[colorOffset++] = b * 255;
+      colorOffset += 9;
     };
 
     type Color = [number, number, number];
@@ -155,7 +159,7 @@ async function main(): Promise<void> {
   const objectInfos: ObjectInfo[] = [];
 
   const staticUnitSize: number =
-    4 * 4 +
+    4 +
     2 * 4;
   const changingUnitSize: number = 
     2 * 4;
@@ -176,23 +180,29 @@ async function main(): Promise<void> {
   });
 
   const kColorOffset: number = 0;
-  const kOffsetOffset: number = 4;
+  const kOffsetOffset: number = 1;
 
   const kScaleOffset: number = 0;
 
   {
-    const staticVertexValues: Float32Array = new Float32Array(staticVertexBufferSize / 4);
+    const staticVertexValuesU8: Uint8Array = new Uint8Array(staticVertexBufferSize);
+    const staticVertexValuesF32: Float32Array = new Float32Array(staticVertexValuesU8.buffer);
     for (let i = 0; i < kNumObjects; i++) {
-      const staticOffset = i * (staticUnitSize / 4);
+      const staticOffsetU8 = i * staticUnitSize;
+      const staticOffsetF32 = staticOffsetU8 / 4;
 
-      staticVertexValues.set([rand(), rand(), rand()], staticOffset + kColorOffset);
-      staticVertexValues.set([rand(-0.9, 0.9), rand(-0.9, 0.9)], staticOffset + kOffsetOffset);
+      staticVertexValuesU8.set(
+        [rand() * 255, rand() * 255, rand() * 255, 255], 
+        staticOffsetU8 + kColorOffset);
+      staticVertexValuesF32.set(
+        [rand(-0.9, 0.9), rand(-0.9, 0.9)], 
+        staticOffsetF32 + kOffsetOffset);
 
       objectInfos.push({
         scale: rand(0.2, 0.5)
       });
     }
-    device!.queue.writeBuffer(staticVertexBuffer, 0, staticVertexValues);
+    device!.queue.writeBuffer(staticVertexBuffer, 0, staticVertexValuesF32);
   }
 
   const vertexValues: Float32Array = new Float32Array(changingVertexBufferSize / 4);
