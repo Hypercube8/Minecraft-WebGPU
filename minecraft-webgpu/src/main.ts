@@ -20,7 +20,8 @@ async function main(): Promise<void> {
     code: /* wgsl */`
       struct Uniforms {
         color: vec4f,
-        resolution: vec2f
+        resolution: vec2f,
+        translation: vec2f
       };
 
       struct Vertex {
@@ -36,7 +37,7 @@ async function main(): Promise<void> {
       @vertex fn vs(vert: Vertex) -> VSOutput {
         var vsOut: VSOutput;
 
-        let position = vert.position;
+        let position = vert.position + uni.translation;
 
         let zeroToOne = position / uni.resolution;
 
@@ -113,7 +114,7 @@ async function main(): Promise<void> {
     }
   }
 
-  const uniformBufferSize: number = (4 + 2) * 4 + 8;
+  const uniformBufferSize: number = (4 + 2 + 2) * 4;
   const uniformBuffer: GPUBuffer = device!.createBuffer({
     label: "uniforms",
     size: uniformBufferSize,
@@ -124,9 +125,11 @@ async function main(): Promise<void> {
 
   const kColorOffset: number = 0;
   const kResolutionOffset: number = 4;
+  const kTranslationOffset: number = 6;
   
   const colorValue: Float32Array = uniformValues.subarray(kColorOffset, kColorOffset + 4);
   const resolutionValue: Float32Array = uniformValues.subarray(kResolutionOffset, kResolutionOffset + 2);
+  const translationValue: Float32Array = uniformValues.subarray(kTranslationOffset, kTranslationOffset + 2);
 
   colorValue.set([Math.random(), Math.random(), Math.random(), 1]);
 
@@ -165,6 +168,10 @@ async function main(): Promise<void> {
     ]
   };
 
+  const settings = {
+    translation: [800, 512]
+  };
+
   function render() {
     (renderPassDescriptor.colorAttachments as any)[0].view = context!.getCurrentTexture().createView();
 
@@ -175,12 +182,13 @@ async function main(): Promise<void> {
     pass.setIndexBuffer(indexBuffer, "uint32");
     
     resolutionValue.set([canvas!.width, canvas!.height]);
+    translationValue.set(settings.translation);
 
     device!.queue.writeBuffer(uniformBuffer, 0, uniformValues);
 
     pass.setBindGroup(0, bindGroup);
     pass.drawIndexed(fModel.numVertices);
-    
+
     pass.end();
 
     const commandBuffer: GPUCommandBuffer = encoder.finish();
