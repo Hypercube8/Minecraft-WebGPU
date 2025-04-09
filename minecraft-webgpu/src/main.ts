@@ -21,7 +21,9 @@ async function main(): Promise<void> {
       struct Uniforms {
         color: vec4f,
         resolution: vec2f,
-        translation: vec2f
+        translation: vec2f,
+        rotation: vec2f,
+        scale: vec2f
       };
 
       struct Vertex {
@@ -37,7 +39,14 @@ async function main(): Promise<void> {
       @vertex fn vs(vert: Vertex) -> VSOutput {
         var vsOut: VSOutput;
 
-        let position = vert.position + uni.translation;
+        let scaledPosition = vert.position * uni.scale;
+
+        let rotatedPosition = vec2f(
+          scaledPosition.x * uni.rotation.x - scaledPosition.y * uni.rotation.y,
+          scaledPosition.x * uni.rotation.y + scaledPosition.y * uni.rotation.x
+        );
+
+        let position = rotatedPosition + uni.translation;
 
         let zeroToOne = position / uni.resolution;
 
@@ -114,7 +123,7 @@ async function main(): Promise<void> {
     }
   }
 
-  const uniformBufferSize: number = (4 + 2 + 2) * 4;
+  const uniformBufferSize: number = (4 + 2 + 2 + 2 + 2) * 4;
   const uniformBuffer: GPUBuffer = device!.createBuffer({
     label: "uniforms",
     size: uniformBufferSize,
@@ -126,10 +135,14 @@ async function main(): Promise<void> {
   const kColorOffset: number = 0;
   const kResolutionOffset: number = 4;
   const kTranslationOffset: number = 6;
+  const kRotationOffset: number = 8;
+  const kScaleOffset: number = 10;
   
   const colorValue: Float32Array = uniformValues.subarray(kColorOffset, kColorOffset + 4);
   const resolutionValue: Float32Array = uniformValues.subarray(kResolutionOffset, kResolutionOffset + 2);
   const translationValue: Float32Array = uniformValues.subarray(kTranslationOffset, kTranslationOffset + 2);
+  const rotationValue: Float32Array = uniformValues.subarray(kRotationOffset, kRotationOffset + 2);
+  const scaleValue: Float32Array = uniformValues.subarray(kScaleOffset, kScaleOffset + 2);
 
   colorValue.set([Math.random(), Math.random(), Math.random(), 1]);
 
@@ -168,8 +181,13 @@ async function main(): Promise<void> {
     ]
   };
 
+  type Converter = (degrees: number) => number;
+  const deg2Rad: Converter = d => d * Math.PI / 180;
+
   const settings = {
-    translation: [800, 512]
+    translation: [200, 200],
+    rotation: deg2Rad(30),
+    scale: [0.5, 0.5]
   };
 
   function render() {
@@ -183,6 +201,8 @@ async function main(): Promise<void> {
     
     resolutionValue.set([canvas!.width, canvas!.height]);
     translationValue.set(settings.translation);
+    rotationValue.set([Math.cos(settings.rotation), Math.sin(settings.rotation)]);
+    scaleValue.set(settings.scale);
 
     device!.queue.writeBuffer(uniformBuffer, 0, uniformValues);
 
