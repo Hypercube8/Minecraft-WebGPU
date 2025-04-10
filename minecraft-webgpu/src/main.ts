@@ -116,25 +116,6 @@ async function main(): Promise<void> {
     }
   }
 
-  const uniformBufferSize: number = (4 + 2 + 2 + 12) * 4;
-  const uniformBuffer: GPUBuffer = device!.createBuffer({
-    label: "uniforms",
-    size: uniformBufferSize,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
-  });
-
-  const uniformValues: Float32Array = new Float32Array(uniformBufferSize / 4);
-
-  const kColorOffset: number = 0;
-  const kResolutionOffset: number = 4;
-  const kMatrixOffset: number = 8;
-  
-  const colorValue: Float32Array = uniformValues.subarray(kColorOffset, kColorOffset + 4);
-  const resolutionValue: Float32Array = uniformValues.subarray(kResolutionOffset, kResolutionOffset + 2);
-  const matrixValue: Float32Array = uniformValues.subarray(kMatrixOffset, kMatrixOffset + 12);
-
-  colorValue.set([Math.random(), Math.random(), Math.random(), 1]);
-
   const fModel: ModelData = createFVerticies();
   const vertexBuffer: GPUBuffer = device!.createBuffer({
     label: "vertex buffer vertices",
@@ -150,13 +131,52 @@ async function main(): Promise<void> {
   });
   device!.queue.writeBuffer(indexBuffer, 0, fModel.indexData);
 
-  const bindGroup: GPUBindGroup = device!.createBindGroup({
-    label: "bind group for object",
-    layout: pipeline.getBindGroupLayout(0),
-    entries: [
-      {binding: 0, resource: { buffer: uniformBuffer }}
-    ]
-  });
+  interface ObjectInfo {
+    uniformBuffer: GPUBuffer;
+    uniformValues: Float32Array;
+    resolutionValue: Float32Array;
+    matrixValue: Float32Array;
+    bindGroup: GPUBindGroup;
+  }
+
+  const numObjects: number = 5;
+  const objectsInfos: ObjectInfo[] = []; 
+  for (let i = 0; i < numObjects; ++i) {
+    const uniformBufferSize: number = (4 + 2 + 2 + 12) * 4;
+    const uniformBuffer: GPUBuffer = device!.createBuffer({
+      label: "uniforms",
+      size: uniformBufferSize,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+    });
+
+    const uniformValues: Float32Array = new Float32Array(uniformBufferSize / 4);
+
+    const kColorOffset: number = 0;
+    const kResolutionOffset: number = 4;
+    const kMatrixOffset: number = 8;
+    
+    const colorValue: Float32Array = uniformValues.subarray(kColorOffset, kColorOffset + 4);
+    const resolutionValue: Float32Array = uniformValues.subarray(kResolutionOffset, kResolutionOffset + 2);
+    const matrixValue: Float32Array = uniformValues.subarray(kMatrixOffset, kMatrixOffset + 12);
+
+    colorValue.set([Math.random(), Math.random(), Math.random(), 1]);
+
+    const bindGroup: GPUBindGroup = device!.createBindGroup({
+      label: "bind group for object",
+      layout: pipeline.getBindGroupLayout(0),
+      entries: [
+        {binding: 0, resource: { buffer: uniformBuffer }}
+      ]
+    });
+
+    objectsInfos.push({
+      uniformBuffer,
+      uniformValues,
+      resolutionValue,
+      matrixValue,
+      bindGroup
+    });
+  }
 
   const renderPassDescriptor: GPURenderPassDescriptor = {
     label: "our basic canvas renderPass",
@@ -180,9 +200,9 @@ async function main(): Promise<void> {
   }
 
   const settings: MatrixSettings = {
-    translation: [0, 0],
-    rotation: deg2Rad(0),
-    scale: [1, 1]
+    translation: [150, 0],
+    rotation: deg2Rad(20),
+    scale: [1.2, 1.2]
   };
 
   function render() {
@@ -198,20 +218,31 @@ async function main(): Promise<void> {
     const rotationMatrix: Mat3x3.Mat3x3 = Mat3x3.rotation(settings.rotation);
     const scaleMatrix: Mat3x3.Mat3x3 = Mat3x3.scaling(settings.scale);
 
-    let matrix: Mat3x3.Mat3x3 = Mat3x3.multiply(scaleMatrix, rotationMatrix);
-    matrix = Mat3x3.multiply(matrix, translationMatrix);
-    
-    resolutionValue.set([canvas!.width, canvas!.height]);
-    matrixValue.set([
-      ...matrix.slice(0, 3), 0,
-      ...matrix.slice(3, 6), 0,
-      ...matrix.slice(6, 9), 0
-    ]);
+    let matrix = Mat3x3.identity();
 
-    device!.queue.writeBuffer(uniformBuffer, 0, uniformValues);
+    for (const {
+      uniformBuffer,
+      uniformValues,
+      resolutionValue,
+      matrixValue,
+      bindGroup
+    } of objectsInfos) {
+      matrix = Mat3x3.multiply(matrix, translationMatrix);
+      matrix = Mat3x3.multiply(matrix, rotationMatrix);
+      matrix = Mat3x3.multiply(matrix, scaleMatrix);
 
-    pass.setBindGroup(0, bindGroup);
-    pass.drawIndexed(fModel.numVertices);
+      resolutionValue.set([canvas!.width, canvas!.height]);
+      matrixValue.set([
+        ...matrix.slice(0, 3), 0,
+        ...matrix.slice(3, 6), 0,
+        ...matrix.slice(6, 9), 0
+      ]);
+
+      device!.queue.writeBuffer(uniformBuffer, 0, uniformValues);
+
+      pass.setBindGroup(0, bindGroup);
+      pass.drawIndexed(fModel.numVertices);
+    }
 
     pass.end();
 

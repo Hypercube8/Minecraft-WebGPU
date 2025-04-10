@@ -5,7 +5,7 @@ export namespace Mat3x3 {
         number, number, number
     ];
 
-    export function multiply(a: mat3x3, b: mat3x3): mat3x3 {
+    export function multiply(a: Mat3x3, b: Mat3x3): Mat3x3 {
         const a00: number = a[0 * 3 + 0];
         const a01: number = a[0 * 3 + 1];
         const a02: number = a[0 * 3 + 2];
@@ -38,7 +38,7 @@ export namespace Mat3x3 {
         ];
     }
 
-    export function translation([tx, ty]: [number, number]): mat3x3 {
+    export function translation([tx, ty]: [number, number]): Mat3x3 {
         return [
             1, 0, 0,
             0, 1, 0,
@@ -46,7 +46,7 @@ export namespace Mat3x3 {
         ];
     }
     
-    export function rotation(angleInRadians: number): mat3x3 {
+    export function rotation(angleInRadians: number): Mat3x3 {
         const c: number = Math.cos(angleInRadians);
         const s: number = Math.sin(angleInRadians);
 
@@ -57,10 +57,18 @@ export namespace Mat3x3 {
         ];
     }
 
-    export function scaling([sx, sy]: [number, number]): mat3x3 {
+    export function scaling([sx, sy]: [number, number]): Mat3x3 {
         return [
             sx, 0, 0,
             0, sy, 0,
+            0, 0, 1
+        ];
+    }
+
+    export function identity(): Mat3x3 {
+        return [
+            1, 0, 0,
+            0, 1, 0,
             0, 0, 1
         ];
     }
