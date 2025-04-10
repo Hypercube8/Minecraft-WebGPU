@@ -1,3 +1,5 @@
+import { Mat3x3 } from "./matrix";
+
 async function main(): Promise<void> {
   const adapter: GPUAdapter | null = await navigator.gpu?.requestAdapter();
   const device: GPUDevice | undefined = await adapter?.requestDevice();
@@ -21,9 +23,7 @@ async function main(): Promise<void> {
       struct Uniforms {
         color: vec4f,
         resolution: vec2f,
-        translation: vec2f,
-        rotation: vec2f,
-        scale: vec2f
+        matrix: mat3x3f
       };
 
       struct Vertex {
@@ -39,14 +39,7 @@ async function main(): Promise<void> {
       @vertex fn vs(vert: Vertex) -> VSOutput {
         var vsOut: VSOutput;
 
-        let scaledPosition = vert.position * uni.scale;
-
-        let rotatedPosition = vec2f(
-          scaledPosition.x * uni.rotation.x - scaledPosition.y * uni.rotation.y,
-          scaledPosition.x * uni.rotation.y + scaledPosition.y * uni.rotation.x
-        );
-
-        let position = rotatedPosition + uni.translation;
+        let position = (uni.matrix * vec3f(vert.position, 1)).xy; 
 
         let zeroToOne = position / uni.resolution;
 
@@ -123,7 +116,7 @@ async function main(): Promise<void> {
     }
   }
 
-  const uniformBufferSize: number = (4 + 2 + 2 + 2 + 2) * 4;
+  const uniformBufferSize: number = (4 + 2 + 2 + 12) * 4;
   const uniformBuffer: GPUBuffer = device!.createBuffer({
     label: "uniforms",
     size: uniformBufferSize,
@@ -134,15 +127,11 @@ async function main(): Promise<void> {
 
   const kColorOffset: number = 0;
   const kResolutionOffset: number = 4;
-  const kTranslationOffset: number = 6;
-  const kRotationOffset: number = 8;
-  const kScaleOffset: number = 10;
+  const kMatrixOffset: number = 8;
   
   const colorValue: Float32Array = uniformValues.subarray(kColorOffset, kColorOffset + 4);
   const resolutionValue: Float32Array = uniformValues.subarray(kResolutionOffset, kResolutionOffset + 2);
-  const translationValue: Float32Array = uniformValues.subarray(kTranslationOffset, kTranslationOffset + 2);
-  const rotationValue: Float32Array = uniformValues.subarray(kRotationOffset, kRotationOffset + 2);
-  const scaleValue: Float32Array = uniformValues.subarray(kScaleOffset, kScaleOffset + 2);
+  const matrixValue: Float32Array = uniformValues.subarray(kMatrixOffset, kMatrixOffset + 12);
 
   colorValue.set([Math.random(), Math.random(), Math.random(), 1]);
 
@@ -184,10 +173,16 @@ async function main(): Promise<void> {
   type Converter = (degrees: number) => number;
   const deg2Rad: Converter = d => d * Math.PI / 180;
 
-  const settings = {
-    translation: [200, 200],
-    rotation: deg2Rad(30),
-    scale: [0.5, 0.5]
+  interface MatrixSettings {
+    translation: [number, number],
+    rotation: number,
+    scale: [number, number]
+  }
+
+  const settings: MatrixSettings = {
+    translation: [0, 0],
+    rotation: deg2Rad(0),
+    scale: [1, 1]
   };
 
   function render() {
@@ -198,11 +193,20 @@ async function main(): Promise<void> {
     pass.setPipeline(pipeline);
     pass.setVertexBuffer(0, vertexBuffer);
     pass.setIndexBuffer(indexBuffer, "uint32");
+
+    const translationMatrix: Mat3x3.Mat3x3 = Mat3x3.translation(settings.translation);
+    const rotationMatrix: Mat3x3.Mat3x3 = Mat3x3.rotation(settings.rotation);
+    const scaleMatrix: Mat3x3.Mat3x3 = Mat3x3.scaling(settings.scale);
+
+    let matrix: Mat3x3.Mat3x3 = Mat3x3.multiply(scaleMatrix, rotationMatrix);
+    matrix = Mat3x3.multiply(matrix, translationMatrix);
     
     resolutionValue.set([canvas!.width, canvas!.height]);
-    translationValue.set(settings.translation);
-    rotationValue.set([Math.cos(settings.rotation), Math.sin(settings.rotation)]);
-    scaleValue.set(settings.scale);
+    matrixValue.set([
+      ...matrix.slice(0, 3), 0,
+      ...matrix.slice(3, 6), 0,
+      ...matrix.slice(6, 9), 0
+    ]);
 
     device!.queue.writeBuffer(uniformBuffer, 0, uniformValues);
 
