@@ -5,6 +5,12 @@ export namespace Mat3x3 {
         number, number, number
     ];
 
+    export const identity: Mat3x3 = [
+        1, 0, 0,
+        0, 1, 0,
+        0, 0, 1
+    ];
+
     export function multiply(a: Mat3x3, b: Mat3x3): Mat3x3 {
         const a00: number = a[0 * 3 + 0];
         const a01: number = a[0 * 3 + 1];
@@ -45,6 +51,10 @@ export namespace Mat3x3 {
             tx, ty, 1
         ];
     }
+
+    export function translate(m: Mat3x3, translation: [number, number]) {
+        return Mat3x3.multiply(m, Mat3x3.translation(translation));
+    }
     
     export function rotation(angleInRadians: number): Mat3x3 {
         const c: number = Math.cos(angleInRadians);
@@ -57,6 +67,10 @@ export namespace Mat3x3 {
         ];
     }
 
+    export function rotate(m: Mat3x3, angleInRadians: number): Mat3x3 {
+        return Mat3x3.multiply(m, Mat3x3.rotation(angleInRadians));
+    }
+
     export function scaling([sx, sy]: [number, number]): Mat3x3 {
         return [
             sx, 0, 0,
@@ -65,11 +79,15 @@ export namespace Mat3x3 {
         ];
     }
 
-    export function identity(): Mat3x3 {
+    export function scale(m: Mat3x3, scale: [number, number]): Mat3x3 {
+        return Mat3x3.multiply(m, Mat3x3.scaling(scale));
+    }
+
+    export function projection(width: number, height: number): Mat3x3 {
         return [
-            1, 0, 0,
-            0, 1, 0,
-            0, 0, 1
+            2 / width, 0, 0,
+            0, -2 / height, 0,
+            -1, 1, 1
         ];
     }
 }

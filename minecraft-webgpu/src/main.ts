@@ -22,7 +22,6 @@ async function main(): Promise<void> {
     code: /* wgsl */`
       struct Uniforms {
         color: vec4f,
-        resolution: vec2f,
         matrix: mat3x3f
       };
 
@@ -39,15 +38,7 @@ async function main(): Promise<void> {
       @vertex fn vs(vert: Vertex) -> VSOutput {
         var vsOut: VSOutput;
 
-        let position = (uni.matrix * vec3f(vert.position, 1)).xy; 
-
-        let zeroToOne = position / uni.resolution;
-
-        let zeroToTwo = zeroToOne * 2.0;
-
-        let flippedClipSpace = zeroToTwo - 1.0;
-
-        let clipSpace = flippedClipSpace * vec2f(1, -1);
+        let clipSpace = (uni.matrix * vec3f(vert.position, 1)).xy;
         
         vsOut.position = vec4f(clipSpace, 0.0, 1.0);
         return vsOut;
@@ -134,7 +125,6 @@ async function main(): Promise<void> {
   interface ObjectInfo {
     uniformBuffer: GPUBuffer;
     uniformValues: Float32Array;
-    resolutionValue: Float32Array;
     matrixValue: Float32Array;
     bindGroup: GPUBindGroup;
   }
@@ -142,7 +132,7 @@ async function main(): Promise<void> {
   const numObjects: number = 5;
   const objectsInfos: ObjectInfo[] = []; 
   for (let i = 0; i < numObjects; ++i) {
-    const uniformBufferSize: number = (4 + 2 + 2 + 12) * 4;
+    const uniformBufferSize: number = (4 + 12) * 4;
     const uniformBuffer: GPUBuffer = device!.createBuffer({
       label: "uniforms",
       size: uniformBufferSize,
@@ -152,11 +142,9 @@ async function main(): Promise<void> {
     const uniformValues: Float32Array = new Float32Array(uniformBufferSize / 4);
 
     const kColorOffset: number = 0;
-    const kResolutionOffset: number = 4;
-    const kMatrixOffset: number = 8;
+    const kMatrixOffset: number = 4;
     
     const colorValue: Float32Array = uniformValues.subarray(kColorOffset, kColorOffset + 4);
-    const resolutionValue: Float32Array = uniformValues.subarray(kResolutionOffset, kResolutionOffset + 2);
     const matrixValue: Float32Array = uniformValues.subarray(kMatrixOffset, kMatrixOffset + 12);
 
     colorValue.set([Math.random(), Math.random(), Math.random(), 1]);
@@ -172,7 +160,6 @@ async function main(): Promise<void> {
     objectsInfos.push({
       uniformBuffer,
       uniformValues,
-      resolutionValue,
       matrixValue,
       bindGroup
     });
@@ -200,10 +187,12 @@ async function main(): Promise<void> {
   }
 
   const settings: MatrixSettings = {
-    translation: [150, 0],
-    rotation: deg2Rad(20),
-    scale: [1.2, 1.2]
+    translation: [100, 0],
+    rotation: deg2Rad(30),
+    scale: [1, 1]
   };
+
+  const projectionMatrix: Mat3x3.Mat3x3 = Mat3x3.projection(canvas!.clientWidth, canvas!.clientHeight);
 
   function render() {
     (renderPassDescriptor.colorAttachments as any)[0].view = context!.getCurrentTexture().createView();
@@ -214,24 +203,18 @@ async function main(): Promise<void> {
     pass.setVertexBuffer(0, vertexBuffer);
     pass.setIndexBuffer(indexBuffer, "uint32");
 
-    const translationMatrix: Mat3x3.Mat3x3 = Mat3x3.translation(settings.translation);
-    const rotationMatrix: Mat3x3.Mat3x3 = Mat3x3.rotation(settings.rotation);
-    const scaleMatrix: Mat3x3.Mat3x3 = Mat3x3.scaling(settings.scale);
-
-    let matrix = Mat3x3.identity();
+    let matrix: Mat3x3.Mat3x3 = projectionMatrix;
 
     for (const {
       uniformBuffer,
       uniformValues,
-      resolutionValue,
       matrixValue,
       bindGroup
     } of objectsInfos) {
-      matrix = Mat3x3.multiply(matrix, translationMatrix);
-      matrix = Mat3x3.multiply(matrix, rotationMatrix);
-      matrix = Mat3x3.multiply(matrix, scaleMatrix);
+      matrix = Mat3x3.translate(matrix, settings.translation);
+      matrix = Mat3x3.rotate(matrix, settings.rotation);
+      matrix = Mat3x3.scale(matrix, settings.scale);
 
-      resolutionValue.set([canvas!.width, canvas!.height]);
       matrixValue.set([
         ...matrix.slice(0, 3), 0,
         ...matrix.slice(3, 6), 0,
