@@ -1,4 +1,4 @@
-import { Mat3x3 } from "./matrix";
+import { Mat4x4 } from "./matrix";
 
 async function main(): Promise<void> {
   const adapter: GPUAdapter | null = await navigator.gpu?.requestAdapter();
@@ -22,11 +22,11 @@ async function main(): Promise<void> {
     code: /* wgsl */`
       struct Uniforms {
         color: vec4f,
-        matrix: mat3x3f
+        matrix: mat4x4f
       };
 
       struct Vertex {
-        @location(0) position: vec2f
+        @location(0) position: vec4f
       }
 
       struct VSOutput {
@@ -37,10 +37,8 @@ async function main(): Promise<void> {
 
       @vertex fn vs(vert: Vertex) -> VSOutput {
         var vsOut: VSOutput;
-
-        let clipSpace = (uni.matrix * vec3f(vert.position, 1)).xy;
         
-        vsOut.position = vec4f(clipSpace, 0.0, 1.0);
+        vsOut.position = uni.matrix * vert.position;
         return vsOut;
       }
 
@@ -57,9 +55,9 @@ async function main(): Promise<void> {
       module,
       buffers: [
         {
-          arrayStride: 2 * 4,
+          arrayStride: 3 * 4,
           attributes: [
-            {shaderLocation: 0, offset: 0, format: "float32x2"}
+            {shaderLocation: 0, offset: 0, format: "float32x3"}
           ]
         }
       ]
@@ -78,20 +76,20 @@ async function main(): Promise<void> {
 
   function createFVerticies(): ModelData {
     const vertexData: Float32Array = new Float32Array([
-      0, 0,
-      30, 0,
-      0, 150,
-      30, 150,
+      0, 0, 0,
+      30, 0, 0,
+      0, 150, 0,
+      30, 150, 0,
 
-      30, 0,
-      100, 0,
-      30, 30,
-      100, 30,
+      30, 0, 0,
+      100, 0, 0,
+      30, 30, 0,
+      100, 30, 0,
 
-      30, 60,
-      70, 60,
-      30, 90,
-      70, 90
+      30, 60, 0,
+      70, 60, 0,
+      30, 90, 0,
+      70, 90, 0
     ]);
 
     const indexData: Uint32Array = new Uint32Array([
@@ -132,7 +130,7 @@ async function main(): Promise<void> {
   const numObjects: number = 5;
   const objectsInfos: ObjectInfo[] = []; 
   for (let i = 0; i < numObjects; ++i) {
-    const uniformBufferSize: number = (4 + 12) * 4;
+    const uniformBufferSize: number = (4 + 16) * 4;
     const uniformBuffer: GPUBuffer = device!.createBuffer({
       label: "uniforms",
       size: uniformBufferSize,
@@ -145,7 +143,7 @@ async function main(): Promise<void> {
     const kMatrixOffset: number = 4;
     
     const colorValue: Float32Array = uniformValues.subarray(kColorOffset, kColorOffset + 4);
-    const matrixValue: Float32Array = uniformValues.subarray(kMatrixOffset, kMatrixOffset + 12);
+    const matrixValue: Float32Array = uniformValues.subarray(kMatrixOffset, kMatrixOffset + 16);
 
     colorValue.set([Math.random(), Math.random(), Math.random(), 1]);
 
@@ -181,15 +179,15 @@ async function main(): Promise<void> {
   const deg2Rad: Converter = d => d * Math.PI / 180;
 
   interface MatrixSettings {
-    translation: [number, number],
-    rotation: number,
-    scale: [number, number]
+    translation: [number, number, number],
+    rotation: [number, number, number],
+    scale: [number, number, number]
   }
 
   const settings: MatrixSettings = {
-    translation: [200, 0],
-    rotation: deg2Rad(30),
-    scale: [1, 1]
+    translation: [100, 100, 0],
+    rotation: [deg2Rad(15), deg2Rad(15), deg2Rad(15)],
+    scale: [1.1, 1.1, 1.1]
   };
 
   function render() {
@@ -201,7 +199,7 @@ async function main(): Promise<void> {
     pass.setVertexBuffer(0, vertexBuffer);
     pass.setIndexBuffer(indexBuffer, "uint32");
 
-    let matrix: Mat3x3.Mat3x3 = Mat3x3.projection(canvas!.clientWidth, canvas!.clientHeight);
+    let matrix: Mat4x4.Mat4x4 = Mat4x4.projection(canvas!.clientWidth, canvas!.clientHeight, 400);
 
     for (const {
       uniformBuffer,
@@ -209,9 +207,11 @@ async function main(): Promise<void> {
       matrixValue,
       bindGroup
     } of objectsInfos) {
-      Mat3x3.translate(matrix, settings.translation, matrix);
-      Mat3x3.rotate(matrix, settings.rotation, matrix);
-      Mat3x3.scale(matrix, settings.scale, matrix);
+      Mat4x4.translate(matrix, settings.translation, matrix);
+      Mat4x4.rotateX(matrix, settings.rotation[0], matrix);
+      Mat4x4.rotateY(matrix, settings.rotation[1], matrix);
+      Mat4x4.rotateZ(matrix, settings.rotation[2], matrix);
+      Mat4x4.scale(matrix, settings.scale, matrix);
 
       matrixValue.set(matrix);
 
