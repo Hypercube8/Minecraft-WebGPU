@@ -192,8 +192,6 @@ async function main(): Promise<void> {
     scale: [1, 1]
   };
 
-  const projectionMatrix: Mat3x3.Mat3x3 = Mat3x3.projection(canvas!.clientWidth, canvas!.clientHeight);
-
   function render() {
     (renderPassDescriptor.colorAttachments as any)[0].view = context!.getCurrentTexture().createView();
 
@@ -203,7 +201,7 @@ async function main(): Promise<void> {
     pass.setVertexBuffer(0, vertexBuffer);
     pass.setIndexBuffer(indexBuffer, "uint32");
 
-    let matrix: Mat3x3.Mat3x3 = projectionMatrix;
+    let matrix: Mat3x3.Mat3x3 = Mat3x3.projection(canvas!.clientWidth, canvas!.clientHeight);
 
     for (const {
       uniformBuffer,
@@ -211,15 +209,11 @@ async function main(): Promise<void> {
       matrixValue,
       bindGroup
     } of objectsInfos) {
-      matrix = Mat3x3.translate(matrix, settings.translation);
-      matrix = Mat3x3.rotate(matrix, settings.rotation);
-      matrix = Mat3x3.scale(matrix, settings.scale);
+      Mat3x3.translate(matrix, settings.translation, matrix);
+      Mat3x3.rotate(matrix, settings.rotation, matrix);
+      Mat3x3.scale(matrix, settings.scale, matrix);
 
-      matrixValue.set([
-        ...matrix.slice(0, 3), 0,
-        ...matrix.slice(3, 6), 0,
-        ...matrix.slice(6, 9), 0
-      ]);
+      matrixValue.set(matrix);
 
       device!.queue.writeBuffer(uniformBuffer, 0, uniformValues);
 
