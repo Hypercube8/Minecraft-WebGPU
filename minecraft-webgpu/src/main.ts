@@ -187,7 +187,7 @@ async function main(): Promise<void> {
   }
 
   const settings: MatrixSettings = {
-    translation: [100, 0],
+    translation: [200, 0],
     rotation: deg2Rad(30),
     scale: [1, 1]
   };
