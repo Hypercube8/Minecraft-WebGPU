@@ -21,16 +21,17 @@ async function main(): Promise<void> {
     label: 'hardcoded triangle',
     code: /* wgsl */`
       struct Uniforms {
-        color: vec4f,
         matrix: mat4x4f
       };
 
       struct Vertex {
-        @location(0) position: vec4f
+        @location(0) position: vec4f,
+        @location(1) color: vec4f
       }
 
       struct VSOutput {
         @builtin(position) position: vec4f,
+        @location(0) color: vec4f
       }
 
       @group(0) @binding(0) var<uniform> uni: Uniforms;
@@ -39,25 +40,28 @@ async function main(): Promise<void> {
         var vsOut: VSOutput;
         
         vsOut.position = uni.matrix * vert.position;
+        vsOut.color = vert.color;
+
         return vsOut;
       }
 
       @fragment fn fs(vsOut: VSOutput) -> @location(0) vec4f {
-        return uni.color;
+        return vsOut.color;
       }
   `
   });
 
   const pipeline: GPURenderPipeline = device.createRenderPipeline({
-    label: "hardcoded triangles pipeline",
+    label: "2 attributes",
     layout: "auto",
     vertex: {
       module,
       buffers: [
         {
-          arrayStride: 3 * 4,
+          arrayStride: 4 * 4,
           attributes: [
-            {shaderLocation: 0, offset: 0, format: "float32x3"}
+            {shaderLocation: 0, offset: 0, format: "float32x3"},
+            {shaderLocation: 1, offset: 12, format: "unorm8x4"}
           ]
         }
       ]
@@ -70,12 +74,11 @@ async function main(): Promise<void> {
 
   interface ModelData {
     vertexData: Float32Array;
-    indexData: Uint32Array;
     numVertices: number;
   }
 
   function createFVerticies(): ModelData {
-    const vertexData: Float32Array = new Float32Array([
+    const positions: number[] = [
       0, 0, 0,
       30, 0, 0,
       0, 150, 0,
@@ -89,19 +92,84 @@ async function main(): Promise<void> {
       30, 60, 0,
       70, 60, 0,
       30, 90, 0,
-      70, 90, 0
-    ]);
+      70, 90, 0,
 
-    const indexData: Uint32Array = new Uint32Array([
+      0, 0, 30,
+      30, 0, 30,
+      0, 150, 30,
+      30, 150, 30,
+
+      30, 0, 30,
+      100, 0, 30,
+      30, 30, 30,
+      100, 30, 30,
+
+      30, 60, 30,
+      70, 60, 30,
+      30, 90, 30,
+      70, 90, 30
+    ];
+
+    const indices: number[] = [
       0, 1, 2,    2, 1, 3,
       4, 5, 6,    6, 5, 7,
-      8, 9, 10,   10, 9, 11
-    ]);
+      8, 9, 10,   10, 9, 11,
+
+      12, 13, 14,    14, 13, 15,
+      16, 17, 18,    18, 17, 19,
+      20, 21, 22,    22, 21, 23,
+      
+      0, 5, 12,    12, 5, 17,
+      5, 7, 17,    17, 7, 19,
+      6, 7, 18,    18, 7, 19,
+      6, 8, 18,    18, 8, 20,
+      8, 9, 20,    20, 9, 21,
+      9, 11, 21,   21, 11, 23,
+      10, 11, 22,  22, 11, 23,
+      10, 3, 22,   22, 3, 15,
+      2, 3, 14,    14, 3, 15,
+      0, 2, 12,    12, 2, 14
+    ];
+
+    const quadColors: number[] = [
+      200, 70, 120,
+      200, 70, 120,
+      200, 70, 120,
+
+      80, 70, 200,
+      80, 70, 200,
+      80, 70, 200,
+
+      70, 200, 210,
+      160, 160, 220,
+      90, 130, 110,
+      200, 200, 70,
+      210, 100, 70,
+      210, 160, 70,
+      70, 180, 210,
+      100, 70, 210,
+      76, 210, 100,
+      140, 210, 80
+    ];
+
+    const numVertices: number = indices.length;
+    const vertexData: Float32Array = new Float32Array(numVertices * 4);
+    const colorData: Uint8Array = new Uint8Array(vertexData.buffer);
+
+    for (let i = 0; i < indices.length; ++i) {
+      const positionNdx: number = indices[i] * 3;
+      const position: number[] = positions.slice(positionNdx, positionNdx + 3);
+      vertexData.set(position, i * 4);
+
+      const quadNdx: number = (i / 6 | 0) * 3;
+      const color: number[] = quadColors.slice(quadNdx, quadNdx + 3); 
+      colorData.set(color, i * 16 + 12);
+      colorData[i * 16 + 15] = 255;
+    }
 
     return {
       vertexData,
-      indexData,
-      numVertices: indexData.length
+      numVertices
     }
   }
 
@@ -113,13 +181,6 @@ async function main(): Promise<void> {
   });
   device!.queue.writeBuffer(vertexBuffer, 0, fModel.vertexData);
 
-  const indexBuffer: GPUBuffer = device!.createBuffer({
-    label: "index buffer",
-    size: fModel.indexData.byteLength,
-    usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST
-  });
-  device!.queue.writeBuffer(indexBuffer, 0, fModel.indexData);
-
   interface ObjectInfo {
     uniformBuffer: GPUBuffer;
     uniformValues: Float32Array;
@@ -130,7 +191,7 @@ async function main(): Promise<void> {
   const numObjects: number = 5;
   const objectsInfos: ObjectInfo[] = []; 
   for (let i = 0; i < numObjects; ++i) {
-    const uniformBufferSize: number = (4 + 16) * 4;
+    const uniformBufferSize: number = (16) * 4;
     const uniformBuffer: GPUBuffer = device!.createBuffer({
       label: "uniforms",
       size: uniformBufferSize,
@@ -139,13 +200,9 @@ async function main(): Promise<void> {
 
     const uniformValues: Float32Array = new Float32Array(uniformBufferSize / 4);
 
-    const kColorOffset: number = 0;
-    const kMatrixOffset: number = 4;
+    const kMatrixOffset: number = 0;
     
-    const colorValue: Float32Array = uniformValues.subarray(kColorOffset, kColorOffset + 4);
     const matrixValue: Float32Array = uniformValues.subarray(kMatrixOffset, kMatrixOffset + 16);
-
-    colorValue.set([Math.random(), Math.random(), Math.random(), 1]);
 
     const bindGroup: GPUBindGroup = device!.createBindGroup({
       label: "bind group for object",
@@ -185,8 +242,8 @@ async function main(): Promise<void> {
   }
 
   const settings: MatrixSettings = {
-    translation: [100, 100, 0],
-    rotation: [deg2Rad(15), deg2Rad(15), deg2Rad(15)],
+    translation: [100, 50, 0],
+    rotation: [deg2Rad(10), deg2Rad(10), deg2Rad(10)],
     scale: [1.1, 1.1, 1.1]
   };
 
@@ -197,7 +254,6 @@ async function main(): Promise<void> {
     const pass: GPURenderPassEncoder = encoder.beginRenderPass(renderPassDescriptor);
     pass.setPipeline(pipeline);
     pass.setVertexBuffer(0, vertexBuffer);
-    pass.setIndexBuffer(indexBuffer, "uint32");
 
     let matrix: Mat4x4.Mat4x4 = Mat4x4.projection(canvas!.clientWidth, canvas!.clientHeight, 400);
 
@@ -218,7 +274,7 @@ async function main(): Promise<void> {
       device!.queue.writeBuffer(uniformBuffer, 0, uniformValues);
 
       pass.setBindGroup(0, bindGroup);
-      pass.drawIndexed(fModel.numVertices);
+      pass.draw(fModel.numVertices);
     }
 
     pass.end();
