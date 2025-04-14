@@ -69,6 +69,14 @@ async function main(): Promise<void> {
     fragment: {
       module,
       targets: [{ format: presentationFormat }]
+    },
+    primitive: {
+      cullMode: "front"
+    },
+    depthStencil: {
+      depthWriteEnabled: true,
+      depthCompare: "less",
+      format: "depth24plus"
     }
   });
 
@@ -115,18 +123,18 @@ async function main(): Promise<void> {
       4, 5, 6,    6, 5, 7,
       8, 9, 10,   10, 9, 11,
 
-      12, 13, 14,    14, 13, 15,
-      16, 17, 18,    18, 17, 19,
-      20, 21, 22,    22, 21, 23,
+      12, 14, 13,    14, 15, 13,
+      16, 18, 17,    18, 19, 17,
+      20, 22, 21,    22, 23, 21,
       
-      0, 5, 12,    12, 5, 17,
-      5, 7, 17,    17, 7, 19,
+      0, 12, 5,    12, 17, 5,
+      5, 17, 7,    17, 19, 7,
       6, 7, 18,    18, 7, 19,
-      6, 8, 18,    18, 8, 20,
-      8, 9, 20,    20, 9, 21,
-      9, 11, 21,   21, 11, 23,
+      6, 18, 8,    18, 20, 8,
+      8, 20, 9,    20, 21, 9,
+      9, 21, 11,   21, 23, 11,
       10, 11, 22,  22, 11, 23,
-      10, 3, 22,   22, 3, 15,
+      10, 22, 3,   22, 15, 3,
       2, 3, 14,    14, 3, 15,
       0, 2, 12,    12, 2, 14
     ];
@@ -229,7 +237,13 @@ async function main(): Promise<void> {
         loadOp: "clear",
         storeOp: "store"
       }
-    ]
+    ],
+    depthStencilAttachment: {
+      view: context!.getCurrentTexture().createView(),
+      depthClearValue: 1.0,
+      depthLoadOp: "clear",
+      depthStoreOp: "store"
+    }
   };
 
   type Converter = (degrees: number) => number;
@@ -247,8 +261,25 @@ async function main(): Promise<void> {
     scale: [1.1, 1.1, 1.1]
   };
 
+  let depthTexture: GPUTexture;
+
   function render() {
-    (renderPassDescriptor.colorAttachments as any)[0].view = context!.getCurrentTexture().createView();
+    const canvasTexture: GPUTexture = context!.getCurrentTexture();
+    (renderPassDescriptor.colorAttachments as any)[0].view = canvasTexture.createView();
+
+    if (!depthTexture ||
+        depthTexture.width !== canvasTexture.width ||
+        depthTexture.height !== canvasTexture.height) {
+      if (depthTexture) {
+        depthTexture.destroy();
+      }
+      depthTexture = device!.createTexture({
+        size: [canvasTexture.width, canvasTexture.height],
+        format: "depth24plus",
+        usage: GPUTextureUsage.RENDER_ATTACHMENT
+      });
+    }
+    renderPassDescriptor.depthStencilAttachment!.view = depthTexture.createView();
 
     const encoder: GPUCommandEncoder = device!.createCommandEncoder({ label: "our encoder" });
     const pass: GPURenderPassEncoder = encoder.beginRenderPass(renderPassDescriptor);
