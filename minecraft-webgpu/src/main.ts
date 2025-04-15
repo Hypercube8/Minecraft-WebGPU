@@ -286,7 +286,14 @@ async function main(): Promise<void> {
     pass.setPipeline(pipeline);
     pass.setVertexBuffer(0, vertexBuffer);
 
-    let matrix: Mat4x4.Mat4x4 = Mat4x4.projection(canvas!.clientWidth, canvas!.clientHeight, 400);
+    let matrix: Mat4x4.Mat4x4 = Mat4x4.ortho(
+      0,
+      canvas!.clientWidth, 
+      canvas!.clientHeight, 
+      0,
+      200,
+      -200
+    );
 
     for (const {
       uniformBuffer,

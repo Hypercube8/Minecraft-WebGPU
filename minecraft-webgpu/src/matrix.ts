@@ -248,11 +248,27 @@ export namespace Mat4x4 {
         return Mat4x4.multiply(m, Mat4x4.scaling(scale), dst);
     }
 
-    export function projection(width: number, height: number, depth: number, dst: Mat4x4 = zeroes()): Mat4x4 {
-        dst[0] = 2 / width; dst[1] = 0; dst[2] = 0; dst[3] = 0;
-        dst[4] = 0; dst[5] = -2 / height; dst[6] = 0; dst[7] = 0;
-        dst[8] = 0; dst[9] = 0; dst[10] = 0.5 / depth; dst[11] = 0;
-        dst[12] = -1; dst[13] = 1; dst[14] = 0.5; dst[15] = 1;
+    export function ortho(left: number, right: number, bottom: number, top: number, near: number, far: number, dst: Mat4x4 = zeroes()): Mat4x4 {
+        dst[0] = 2 / (right - left); 
+        dst[1] = 0; 
+        dst[2] = 0; 
+        dst[3] = 0;
+
+        dst[4] = 0; 
+        dst[5] = 2 / (top - bottom); 
+        dst[6] = 0; 
+        dst[7] = 0;
+
+        dst[8] = 0; 
+        dst[9] = 0;
+        dst[10] = 1 / (near - far); 
+        dst[11] = 0;
+
+        dst[12] = (right + left) / (left - right); 
+        dst[13] = (top + bottom) / (bottom - top); 
+        dst[14] = near / (near - far);
+        dst[15] = 1;
+        
         return dst;
     }
 }
