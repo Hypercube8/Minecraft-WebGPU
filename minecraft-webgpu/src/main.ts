@@ -21,7 +21,8 @@ async function main(): Promise<void> {
     label: 'hardcoded triangle',
     code: /* wgsl */`
       struct Uniforms {
-        matrix: mat4x4f
+        matrix: mat4x4f,
+        fudgeFactor: f32
       };
 
       struct Vertex {
@@ -39,9 +40,12 @@ async function main(): Promise<void> {
       @vertex fn vs(vert: Vertex) -> VSOutput {
         var vsOut: VSOutput;
         
-        vsOut.position = uni.matrix * vert.position;
-        vsOut.color = vert.color;
+        let position = uni.matrix * vert.position;
 
+        let zToDivideBy = 1.0 + position.z * uni.fudgeFactor;
+
+        vsOut.position = vec4f(position.xyz, zToDivideBy);
+        vsOut.color = vert.color;
         return vsOut;
       }
 
@@ -193,13 +197,14 @@ async function main(): Promise<void> {
     uniformBuffer: GPUBuffer;
     uniformValues: Float32Array;
     matrixValue: Float32Array;
+    fudgeFactorValue: Float32Array;
     bindGroup: GPUBindGroup;
   }
 
   const numObjects: number = 5;
   const objectsInfos: ObjectInfo[] = []; 
   for (let i = 0; i < numObjects; ++i) {
-    const uniformBufferSize: number = (16) * 4;
+    const uniformBufferSize: number = (16 + 1 + 3) * 4;
     const uniformBuffer: GPUBuffer = device!.createBuffer({
       label: "uniforms",
       size: uniformBufferSize,
@@ -209,8 +214,10 @@ async function main(): Promise<void> {
     const uniformValues: Float32Array = new Float32Array(uniformBufferSize / 4);
 
     const kMatrixOffset: number = 0;
+    const kFudgeFactorOffset: number = 16;
     
     const matrixValue: Float32Array = uniformValues.subarray(kMatrixOffset, kMatrixOffset + 16);
+    const fudgeFactorValue: Float32Array = uniformValues.subarray(kFudgeFactorOffset, kFudgeFactorOffset + 1);
 
     const bindGroup: GPUBindGroup = device!.createBindGroup({
       label: "bind group for object",
@@ -224,6 +231,7 @@ async function main(): Promise<void> {
       uniformBuffer,
       uniformValues,
       matrixValue,
+      fudgeFactorValue,
       bindGroup
     });
   }
@@ -252,13 +260,15 @@ async function main(): Promise<void> {
   interface MatrixSettings {
     translation: [number, number, number],
     rotation: [number, number, number],
-    scale: [number, number, number]
+    scale: [number, number, number],
+    fudgeFactor: number
   }
 
   const settings: MatrixSettings = {
-    translation: [100, 50, 0],
-    rotation: [deg2Rad(10), deg2Rad(10), deg2Rad(10)],
-    scale: [1.1, 1.1, 1.1]
+    translation: [0, 0, -1000],
+    rotation: [deg2Rad(40), deg2Rad(0), deg2Rad(0)],
+    scale: [3, 3, 3],
+    fudgeFactor: 10
   };
 
   let depthTexture: GPUTexture;
@@ -291,14 +301,15 @@ async function main(): Promise<void> {
       canvas!.clientWidth, 
       canvas!.clientHeight, 
       0,
-      200,
-      -200
+      1200,
+      -1200
     );
 
     for (const {
       uniformBuffer,
       uniformValues,
       matrixValue,
+      fudgeFactorValue,
       bindGroup
     } of objectsInfos) {
       Mat4x4.translate(matrix, settings.translation, matrix);
@@ -308,6 +319,7 @@ async function main(): Promise<void> {
       Mat4x4.scale(matrix, settings.scale, matrix);
 
       matrixValue.set(matrix);
+      fudgeFactorValue[0] = settings.fudgeFactor;
 
       device!.queue.writeBuffer(uniformBuffer, 0, uniformValues);
 
