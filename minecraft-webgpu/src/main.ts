@@ -70,7 +70,7 @@ async function main(): Promise<void> {
       targets: [{ format: presentationFormat }]
     },
     primitive: {
-      cullMode: "front"
+      cullMode: "back"
     },
     depthStencil: {
       depthWriteEnabled: true,
@@ -86,56 +86,56 @@ async function main(): Promise<void> {
 
   function createFVerticies(): ModelData {
     const positions: number[] = [
-      0, 0, 0,
-      30, 0, 0,
-      0, 150, 0,
-      30, 150, 0,
+      -50, 75, 15,
+      -20, 75, 15,
+      -50, -75, 15,
+      -20, -75, 15,
 
-      30, 0, 0,
-      100, 0, 0,
-      30, 30, 0,
-      100, 30, 0,
+      -20, 75, 15,
+      50, 75, 15,
+      -20, 45, 15,
+      50, 45, 15,
 
-      30, 60, 0,
-      70, 60, 0,
-      30, 90, 0,
-      70, 90, 0,
+      -20, 15, 15,
+      20, 15, 15,
+      -20, -15, 15,
+      20, -15, 15,
+      
+      -50, 75, -15,
+      -20, 75, -15,
+      -50, -75, -15,
+      -20, -75, -15,
 
-      0, 0, 30,
-      30, 0, 30,
-      0, 150, 30,
-      30, 150, 30,
+      -20, 75, -15,
+      50, 75, -15,
+      -20, 45, -15,
+      50, 45, -15,
 
-      30, 0, 30,
-      100, 0, 30,
-      30, 30, 30,
-      100, 30, 30,
-
-      30, 60, 30,
-      70, 60, 30,
-      30, 90, 30,
-      70, 90, 30
+      -20, 15, -15,
+      20, 15, -15,
+      -20, -15, -15,
+      20, -15, -15
     ];
 
     const indices: number[] = [
-      0, 1, 2,    2, 1, 3,
-      4, 5, 6,    6, 5, 7,
-      8, 9, 10,   10, 9, 11,
-
-      12, 14, 13,    14, 15, 13,
-      16, 18, 17,    18, 19, 17,
-      20, 22, 21,    22, 23, 21,
-      
-      0, 12, 5,    12, 17, 5,
-      5, 17, 7,    17, 19, 7,
-      6, 7, 18,    18, 7, 19,
-      6, 18, 8,    18, 20, 8,
-      8, 20, 9,    20, 21, 9,
-      9, 21, 11,   21, 23, 11,
-      10, 11, 22,  22, 11, 23,
-      10, 22, 3,   22, 15, 3,
-      2, 3, 14,    14, 3, 15,
-      0, 2, 12,    12, 2, 14
+      0,  2,  1,    2,  3,  1,   
+      4,  6,  5,    6,  7,  5,   
+      8, 10,  9,   10, 11,  9,   
+  
+      12, 13, 14,   14, 13, 15,   
+      16, 17, 18,   18, 17, 19,   
+      20, 21, 22,   22, 21, 23,   
+  
+      0,  5, 12,   12,  5, 17,   
+      5,  7, 17,   17,  7, 19,   
+      6, 18,  7,   18, 19,  7,   
+      6,  8, 18,   18,  8, 20,   
+      8,  9, 20,   20,  9, 21,   
+      9, 11, 21,   21, 11, 23,   
+      10, 22, 11,   22, 23, 11,   
+      10,  3, 22,   22,  3, 15,   
+      2, 14,  3,   14, 15,  3,   
+      0, 12,  2,   12, 14,  2
     ];
 
     const quadColors: number[] = [
@@ -250,16 +250,13 @@ async function main(): Promise<void> {
 
   interface MatrixSettings {
     fieldOfView: number,
-    translation: [number, number, number],
-    rotation: [number, number, number],
-    scale: [number, number, number]
+    cameraAngle: number
   }
 
+  const radius: number = 200;
   const settings: MatrixSettings = {
     fieldOfView: deg2Rad(100),
-    translation: [-65, 0, -120],
-    rotation: [deg2Rad(220), deg2Rad(25), deg2Rad(325)],
-    scale: [1, 1, 1]
+    cameraAngle: deg2Rad(30)
   };
 
   let depthTexture: GPUTexture;
@@ -288,32 +285,36 @@ async function main(): Promise<void> {
     pass.setVertexBuffer(0, vertexBuffer);
 
     const aspect: number = canvas!.clientWidth / canvas!.clientHeight;
-    let matrix: Mat4x4.Mat4x4 = Mat4x4.perspective(
+    const projection: Mat4x4.Mat4x4 = Mat4x4.perspective(
       settings.fieldOfView,
       aspect,
       1,
       2000
     );
 
-    for (const {
+    const cameraMatrix: Mat4x4.Mat4x4 = Mat4x4.rotationY(settings.cameraAngle);
+    Mat4x4.translate(cameraMatrix, [0, 0, radius * 1.5], cameraMatrix);
+
+    const viewMatrix: Mat4x4.Mat4x4 = Mat4x4.inverse(cameraMatrix);
+    const viewProjectionMatrix: Mat4x4.Mat4x4 = Mat4x4.multiply(projection, viewMatrix);
+
+    objectsInfos.forEach(({
+      matrixValue,
       uniformBuffer,
       uniformValues,
-      matrixValue,
       bindGroup
-    } of objectsInfos) {
-      Mat4x4.translate(matrix, settings.translation, matrix);
-      Mat4x4.rotateX(matrix, settings.rotation[0], matrix);
-      Mat4x4.rotateY(matrix, settings.rotation[1], matrix);
-      Mat4x4.rotateZ(matrix, settings.rotation[2], matrix);
-      Mat4x4.scale(matrix, settings.scale, matrix);
+    }, i) => {
+      const angle: number = i / numObjects * Math.PI * 2;
+      const x: number = Math.cos(angle) * radius;
+      const z: number = Math.sin(angle) * radius;
 
-      matrixValue.set(matrix);
+      matrixValue.set(Mat4x4.translate(viewProjectionMatrix, [x, 0, z]));
 
       device!.queue.writeBuffer(uniformBuffer, 0, uniformValues);
 
       pass.setBindGroup(0, bindGroup);
       pass.draw(fModel.numVertices);
-    }
+    });
 
     pass.end();
 
