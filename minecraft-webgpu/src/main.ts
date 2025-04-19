@@ -195,7 +195,7 @@ async function main(): Promise<void> {
     bindGroup: GPUBindGroup;
   }
 
-  const numObjects: number = 5;
+  const numObjects: number = 5 * 5 + 1;
   const objectsInfos: ObjectInfo[] = []; 
   for (let i = 0; i < numObjects; ++i) {
     const uniformBufferSize: number = (16) * 4;
@@ -249,15 +249,18 @@ async function main(): Promise<void> {
   const deg2Rad: Converter = d => d * Math.PI / 180;
 
   interface MatrixSettings {
-    fieldOfView: number,
-    cameraAngle: number
+    target: Vec3.Vec3,
+    targetAngle: number
   }
 
   const radius: number = 200;
   const settings: MatrixSettings = {
-    fieldOfView: deg2Rad(100),
-    cameraAngle: deg2Rad(150)
+    target: [0, 200, 300],
+    targetAngle: deg2Rad(0)
   };
+
+  settings.target[0] = Math.cos(settings.targetAngle) * radius;
+  settings.target[2] = Math.sin(settings.targetAngle) * radius;
 
   let depthTexture: GPUTexture;
 
@@ -286,23 +289,17 @@ async function main(): Promise<void> {
 
     const aspect: number = canvas!.clientWidth / canvas!.clientHeight;
     const projection: Mat4x4.Mat4x4 = Mat4x4.perspective(
-      settings.fieldOfView,
+      deg2Rad(60),
       aspect,
       1,
       2000
     );
 
-    const fPosition: Vec3.Vec3 = [radius, 0, 0];
-
-    const tempMatrix: Mat4x4.Mat4x4 = Mat4x4.rotationY(settings.cameraAngle);
-    Mat4x4.translate(tempMatrix, [0, 0, radius * 1.5], tempMatrix);
-
-    const eye: Vec3.Vec3 = tempMatrix.slice(12, 15) as Vec3.Vec3;
+    const eye: Vec3.Vec3 = [-500, 300, -500];
+    const target: Vec3.Vec3 = [0, -100, 0];
     const up: Vec3.Vec3 = [0, 1, 0];
 
-    const cameraMatrix: Mat4x4.Mat4x4 = Mat4x4.cameraAim(eye, fPosition, up);
-
-    const viewMatrix: Mat4x4.Mat4x4 = Mat4x4.inverse(cameraMatrix);
+    const viewMatrix: Mat4x4.Mat4x4 = Mat4x4.lookAt(eye, target, up);
     const viewProjectionMatrix: Mat4x4.Mat4x4 = Mat4x4.multiply(projection, viewMatrix);
 
     objectsInfos.forEach(({
@@ -311,11 +308,24 @@ async function main(): Promise<void> {
       uniformValues,
       bindGroup
     }, i) => {
-      const angle: number = i / numObjects * Math.PI * 2;
-      const x: number = Math.cos(angle) * radius;
-      const z: number = Math.sin(angle) * radius;
+      const deep: number = 5;
+      const across: number = 5;
 
-      matrixValue.set(Mat4x4.translate(viewProjectionMatrix, [x, 0, z]));
+      if (i < 25) {
+        const gridX: number = i % across;
+        const gridY: number = i / across | 0;
+
+        const u: number = gridX / (across - 1);
+        const v: number = gridY / (deep - 1);
+
+        const x: number = (u - 0.5) * across * 150;
+        const z: number = (v - 0.5) * deep * 150;
+
+        const aimMatrix: Mat4x4.Mat4x4 = Mat4x4.aim([x, 0, z], settings.target, up);
+        matrixValue.set(Mat4x4.multiply(viewProjectionMatrix, aimMatrix));
+      } else {
+        matrixValue.set(Mat4x4.translate(viewProjectionMatrix, settings.target));
+      }
 
       device!.queue.writeBuffer(uniformBuffer, 0, uniformValues);
 
