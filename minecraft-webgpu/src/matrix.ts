@@ -388,4 +388,61 @@ export namespace Mat4x4 {
 
         return dst;
     }
+
+    export function cameraAim(eye: Vec3.Vec3, target: Vec3.Vec3, up: Vec3.Vec3, dst: Mat4x4 = zeroes()): Mat4x4 {
+        const zAxis: Vec3.Vec3 = Vec3.normalize(Vec3.subtract(eye, target));
+        const xAxis: Vec3.Vec3 = Vec3.normalize(Vec3.cross(up, zAxis));
+        const yAxis: Vec3.Vec3 = Vec3.normalize(Vec3.cross(zAxis, xAxis));
+
+        dst[0] = xAxis[0]; dst[1] = xAxis[1]; dst[2] = xAxis[2]; dst[3] = 0;
+        dst[4] = yAxis[0]; dst[5] = yAxis[1]; dst[6] = yAxis[2]; dst[7] = 0;
+        dst[8] = zAxis[0]; dst[9] = zAxis[1]; dst[10] = zAxis[2]; dst[11] = 0;
+        dst[12] = eye[0]; dst[13] = eye[1]; dst[14] = eye[2]; dst[15] = 1;
+
+        return dst;
+    }
+}
+
+export namespace Vec3 {
+    export type Vec3 = [number, number, number];
+
+    export function zeroes(): Vec3 {
+        return [0, 0, 0];
+    }
+
+    export function subtract(a: Vec3, b: Vec3, dst: Vec3 = zeroes()): Vec3 {
+        dst[0] = a[0] - b[0];
+        dst[1] = a[1] - b[1];
+        dst[2] = a[2] - b[2];
+
+        return dst;
+    }
+
+    export function cross(a: Vec3, b: Vec3, dst: Vec3 = zeroes()): Vec3 {
+        const t0: number = a[1] * b[2] - a[2] * b[1];
+        const t1: number = a[2] * b[0] - a[0] * b[2];
+        const t2: number = a[0] * b[1] - a[1] * b[0];
+        
+        dst[0] = t0;
+        dst[1] = t1;
+        dst[2] = t2;
+
+        return dst;
+    }
+
+    export function normalize(v: Vec3, dst: Vec3 = zeroes()): Vec3 {
+        const length: number = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+
+        if (length > 0.00001) {
+            dst[0] = v[0] / length;
+            dst[1] = v[1] / length;
+            dst[2] = v[2] / length;
+        } else {
+            dst[0] = 0;
+            dst[1] = 0;
+            dst[2] = 0;
+        }
+
+        return dst;
+    }
 }

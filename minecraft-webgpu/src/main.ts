@@ -1,4 +1,4 @@
-import { Mat4x4 } from "./matrix";
+import { Mat4x4, Vec3 } from "./matrix";
 
 async function main(): Promise<void> {
   const adapter: GPUAdapter | null = await navigator.gpu?.requestAdapter();
@@ -256,7 +256,7 @@ async function main(): Promise<void> {
   const radius: number = 200;
   const settings: MatrixSettings = {
     fieldOfView: deg2Rad(100),
-    cameraAngle: deg2Rad(30)
+    cameraAngle: deg2Rad(150)
   };
 
   let depthTexture: GPUTexture;
@@ -292,8 +292,15 @@ async function main(): Promise<void> {
       2000
     );
 
-    const cameraMatrix: Mat4x4.Mat4x4 = Mat4x4.rotationY(settings.cameraAngle);
-    Mat4x4.translate(cameraMatrix, [0, 0, radius * 1.5], cameraMatrix);
+    const fPosition: Vec3.Vec3 = [radius, 0, 0];
+
+    const tempMatrix: Mat4x4.Mat4x4 = Mat4x4.rotationY(settings.cameraAngle);
+    Mat4x4.translate(tempMatrix, [0, 0, radius * 1.5], tempMatrix);
+
+    const eye: Vec3.Vec3 = tempMatrix.slice(12, 15) as Vec3.Vec3;
+    const up: Vec3.Vec3 = [0, 1, 0];
+
+    const cameraMatrix: Mat4x4.Mat4x4 = Mat4x4.cameraAim(eye, fPosition, up);
 
     const viewMatrix: Mat4x4.Mat4x4 = Mat4x4.inverse(cameraMatrix);
     const viewProjectionMatrix: Mat4x4.Mat4x4 = Mat4x4.multiply(projection, viewMatrix);
