@@ -1,4 +1,4 @@
-import { Mat4x4, Vec3 } from "./matrix";
+import { Mat3x3, Mat4x4, Vec3 } from "./matrix";
 
 async function main(): Promise<void> {
   const adapter: GPUAdapter | null = await navigator.gpu?.requestAdapter();
@@ -21,17 +21,20 @@ async function main(): Promise<void> {
     label: 'hardcoded triangle',
     code: /* wgsl */`
       struct Uniforms {
-        matrix: mat4x4f
+        normalMatrix: mat3x3f,
+        worldViewProjection: mat4x4f,
+        color: vec4f,
+        lightDirection: vec3f
       };
 
       struct Vertex {
         @location(0) position: vec4f,
-        @location(1) color: vec4f
+        @location(1) normal: vec3f
       }
 
       struct VSOutput {
         @builtin(position) position: vec4f,
-        @location(0) color: vec4f
+        @location(0) normal: vec3f
       }
 
       @group(0) @binding(0) var<uniform> uni: Uniforms;
@@ -39,13 +42,19 @@ async function main(): Promise<void> {
       @vertex fn vs(vert: Vertex) -> VSOutput {
         var vsOut: VSOutput;
         
-        vsOut.position = uni.matrix * vert.position;
-        vsOut.color = vert.color;
+        vsOut.position = uni.worldViewProjection * vert.position;
+        vsOut.normal = uni.normalMatrix * vert.normal;
         return vsOut;
       }
 
       @fragment fn fs(vsOut: VSOutput) -> @location(0) vec4f {
-        return vsOut.color;
+        let normal = normalize(vsOut.normal);
+
+        let light = dot(normal, -uni.lightDirection);
+
+        let color = uni.color.rgb * light;
+
+        return vec4f(color, uni.color.a);
       }
   `
   });
@@ -57,10 +66,10 @@ async function main(): Promise<void> {
       module,
       buffers: [
         {
-          arrayStride: 4 * 4,
+          arrayStride: (3 + 3) * 4,
           attributes: [
             {shaderLocation: 0, offset: 0, format: "float32x3"},
-            {shaderLocation: 1, offset: 12, format: "unorm8x4"}
+            {shaderLocation: 1, offset: 12, format: "float32x3"}
           ]
         }
       ]
@@ -138,40 +147,38 @@ async function main(): Promise<void> {
       0, 12,  2,   12, 14,  2
     ];
 
-    const quadColors: number[] = [
-      200, 70, 120,
-      200, 70, 120,
-      200, 70, 120,
+    const normals: number[] = [
+      0, 0, 1,
+      0, 0, 1,
+      0, 0, 1,
 
-      80, 70, 200,
-      80, 70, 200,
-      80, 70, 200,
+      0, 0, -1,
+      0, 0, -1,
+      0, 0, -1,
 
-      70, 200, 210,
-      160, 160, 220,
-      90, 130, 110,
-      200, 200, 70,
-      210, 100, 70,
-      210, 160, 70,
-      70, 180, 210,
-      100, 70, 210,
-      76, 210, 100,
-      140, 210, 80
+      0, 1, 0,
+      1, 0, 0,
+      0, -1, 0,
+      1, 0, 0,
+      0, 1, 0,
+      1, 0, 0,
+      0, -1, 0,
+      1, 0, 0,
+      0, -1, 0,
+      -1, 0, 0
     ];
 
     const numVertices: number = indices.length;
-    const vertexData: Float32Array = new Float32Array(numVertices * 4);
-    const colorData: Uint8Array = new Uint8Array(vertexData.buffer);
+    const vertexData: Float32Array = new Float32Array(numVertices * 6);
 
     for (let i = 0; i < indices.length; ++i) {
       const positionNdx: number = indices[i] * 3;
       const position: number[] = positions.slice(positionNdx, positionNdx + 3);
-      vertexData.set(position, i * 4);
+      vertexData.set(position, i * 6);
 
       const quadNdx: number = (i / 6 | 0) * 3;
-      const color: number[] = quadColors.slice(quadNdx, quadNdx + 3); 
-      colorData.set(color, i * 16 + 12);
-      colorData[i * 16 + 15] = 255;
+      const normal: number[] = normals.slice(quadNdx, quadNdx + 3);
+      vertexData.set(normal, i * 6 + 3);
     }
 
     return {
@@ -191,14 +198,17 @@ async function main(): Promise<void> {
   interface ObjectInfo {
     uniformBuffer: GPUBuffer;
     uniformValues: Float32Array;
-    matrixValue: Float32Array;
+    normalMatrixValue: Float32Array;
+    worldViewProjectionValue: Float32Array;
+    colorValue: Float32Array;
+    lightDirectionValue: Float32Array;
     bindGroup: GPUBindGroup;
   }
 
   const numObjects: number = 5 * 5 + 1;
   const objectsInfos: ObjectInfo[] = []; 
   for (let i = 0; i < numObjects; ++i) {
-    const uniformBufferSize: number = (16) * 4;
+    const uniformBufferSize: number = (12 + 16 + 4 + 4) * 4;
     const uniformBuffer: GPUBuffer = device!.createBuffer({
       label: "uniforms",
       size: uniformBufferSize,
@@ -207,9 +217,15 @@ async function main(): Promise<void> {
 
     const uniformValues: Float32Array = new Float32Array(uniformBufferSize / 4);
 
-    const kMatrixOffset: number = 0;
-    
-    const matrixValue: Float32Array = uniformValues.subarray(kMatrixOffset, kMatrixOffset + 16);
+    const kNormalMatrixOffset: number = 0;
+    const kWorldViewProjectionOffset: number = 12;
+    const kColorOffset: number = 28;
+    const kLightDirectionOffset: number = 32;
+ 
+    const normalMatrixValue: Float32Array = uniformValues.subarray(kNormalMatrixOffset, kNormalMatrixOffset + 12);
+    const worldViewProjectionValue: Float32Array = uniformValues.subarray(kWorldViewProjectionOffset, kWorldViewProjectionOffset + 16);
+    const colorValue: Float32Array = uniformValues.subarray(kColorOffset, kColorOffset + 4);
+    const lightDirectionValue: Float32Array = uniformValues.subarray(kLightDirectionOffset, kLightDirectionOffset + 3);
 
     const bindGroup: GPUBindGroup = device!.createBindGroup({
       label: "bind group for object",
@@ -222,7 +238,10 @@ async function main(): Promise<void> {
     objectsInfos.push({
       uniformBuffer,
       uniformValues,
-      matrixValue,
+      normalMatrixValue,
+      worldViewProjectionValue,
+      colorValue,
+      lightDirectionValue,
       bindGroup
     });
   }
@@ -253,9 +272,12 @@ async function main(): Promise<void> {
     targetAngle: number
   }
 
+  let height = 0;
+  let time = 0;
+
   const radius: number = 200;
   const settings: MatrixSettings = {
-    target: [0, 200, 300],
+    target: [0, height, 300],
     targetAngle: deg2Rad(0)
   };
 
@@ -265,6 +287,10 @@ async function main(): Promise<void> {
   let depthTexture: GPUTexture;
 
   function render() {
+    time++;
+    height = Math.sin(time / 120) * 600;
+    settings.target[1] = height;
+
     const canvasTexture: GPUTexture = context!.getCurrentTexture();
     (renderPassDescriptor.colorAttachments as any)[0].view = canvasTexture.createView();
 
@@ -303,7 +329,10 @@ async function main(): Promise<void> {
     const viewProjectionMatrix: Mat4x4.Mat4x4 = Mat4x4.multiply(projection, viewMatrix);
 
     objectsInfos.forEach(({
-      matrixValue,
+      normalMatrixValue,
+      worldViewProjectionValue,
+      colorValue,
+      lightDirectionValue,
       uniformBuffer,
       uniformValues,
       bindGroup
@@ -322,10 +351,18 @@ async function main(): Promise<void> {
         const z: number = (v - 0.5) * deep * 150;
 
         const aimMatrix: Mat4x4.Mat4x4 = Mat4x4.aim([x, 0, z], settings.target, up);
-        matrixValue.set(Mat4x4.multiply(viewProjectionMatrix, aimMatrix));
+        const inverseTranspose: Mat4x4.Mat4x4 = Mat4x4.transpose(Mat4x4.inverse(aimMatrix));
+        normalMatrixValue.set(Mat3x3.fromMat4(inverseTranspose));
+        worldViewProjectionValue.set(Mat4x4.multiply(viewProjectionMatrix, aimMatrix));
       } else {
-        matrixValue.set(Mat4x4.translate(viewProjectionMatrix, settings.target));
+        const worldMatrix: Mat4x4.Mat4x4 = Mat4x4.translation(settings.target);
+        const inverseTranspose: Mat4x4.Mat4x4 = Mat4x4.transpose(Mat4x4.inverse(worldMatrix));
+        normalMatrixValue.set(Mat3x3.fromMat4(inverseTranspose));
+        worldViewProjectionValue.set(Mat4x4.translate(viewProjectionMatrix, settings.target));
       }
+
+      colorValue.set([0.2, 1, 0.2, 1]);
+      lightDirectionValue.set(Vec3.normalize([-0.5, -0.7, -1]));
 
       device!.queue.writeBuffer(uniformBuffer, 0, uniformValues);
 
@@ -337,6 +374,8 @@ async function main(): Promise<void> {
 
     const commandBuffer: GPUCommandBuffer = encoder.finish();
     device!.queue.submit([commandBuffer]);
+
+    requestAnimationFrame(render);
   }
 
   const observer: ResizeObserver = new ResizeObserver(entries => {
