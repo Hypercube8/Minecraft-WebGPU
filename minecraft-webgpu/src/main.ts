@@ -23,8 +23,9 @@ async function main(): Promise<void> {
       struct Uniforms {
         normalMatrix: mat3x3f,
         worldViewProjection: mat4x4f,
+        world: mat4x4f,
         color: vec4f,
-        lightDirection: vec3f
+        lightPosition: vec3f
       };
 
       struct Vertex {
@@ -34,7 +35,8 @@ async function main(): Promise<void> {
 
       struct VSOutput {
         @builtin(position) position: vec4f,
-        @location(0) normal: vec3f
+        @location(0) normal: vec3f,
+        @location(1) surfaceToLight: vec3f
       }
 
       @group(0) @binding(0) var<uniform> uni: Uniforms;
@@ -44,13 +46,18 @@ async function main(): Promise<void> {
         
         vsOut.position = uni.worldViewProjection * vert.position;
         vsOut.normal = uni.normalMatrix * vert.normal;
+
+        let surfaceWorldPosition = (uni.world * vert.position).xyz;
+        vsOut.surfaceToLight = uni.lightPosition - surfaceWorldPosition;
+
         return vsOut;
       }
 
       @fragment fn fs(vsOut: VSOutput) -> @location(0) vec4f {
         let normal = normalize(vsOut.normal);
+        let surfaceToLightDirection = normalize(vsOut.surfaceToLight);
 
-        let light = dot(normal, -uni.lightDirection);
+        let light = dot(normal, surfaceToLightDirection);
 
         let color = uni.color.rgb * light;
 
@@ -200,15 +207,16 @@ async function main(): Promise<void> {
     uniformValues: Float32Array;
     normalMatrixValue: Float32Array;
     worldViewProjectionValue: Float32Array;
+    worldValue: Float32Array;
     colorValue: Float32Array;
-    lightDirectionValue: Float32Array;
+    lightPositionValue: Float32Array;
     bindGroup: GPUBindGroup;
   }
 
   const numObjects: number = 5 * 5 + 1;
   const objectsInfos: ObjectInfo[] = []; 
   for (let i = 0; i < numObjects; ++i) {
-    const uniformBufferSize: number = (12 + 16 + 4 + 4) * 4;
+    const uniformBufferSize: number = (12 + 16 + 16 + 4 + 4) * 4;
     const uniformBuffer: GPUBuffer = device!.createBuffer({
       label: "uniforms",
       size: uniformBufferSize,
@@ -219,13 +227,15 @@ async function main(): Promise<void> {
 
     const kNormalMatrixOffset: number = 0;
     const kWorldViewProjectionOffset: number = 12;
-    const kColorOffset: number = 28;
-    const kLightDirectionOffset: number = 32;
+    const kWorldOffset: number = 28;
+    const kColorOffset: number = 44;
+    const kLightPositionOffset: number = 48;
  
     const normalMatrixValue: Float32Array = uniformValues.subarray(kNormalMatrixOffset, kNormalMatrixOffset + 12);
     const worldViewProjectionValue: Float32Array = uniformValues.subarray(kWorldViewProjectionOffset, kWorldViewProjectionOffset + 16);
+    const worldValue: Float32Array = uniformValues.subarray(kWorldOffset, kWorldOffset + 16);
     const colorValue: Float32Array = uniformValues.subarray(kColorOffset, kColorOffset + 4);
-    const lightDirectionValue: Float32Array = uniformValues.subarray(kLightDirectionOffset, kLightDirectionOffset + 3);
+    const lightPositionValue: Float32Array = uniformValues.subarray(kLightPositionOffset, kLightPositionOffset + 3);
 
     const bindGroup: GPUBindGroup = device!.createBindGroup({
       label: "bind group for object",
@@ -240,8 +250,9 @@ async function main(): Promise<void> {
       uniformValues,
       normalMatrixValue,
       worldViewProjectionValue,
+      worldValue,
       colorValue,
-      lightDirectionValue,
+      lightPositionValue,
       bindGroup
     });
   }
@@ -331,8 +342,9 @@ async function main(): Promise<void> {
     objectsInfos.forEach(({
       normalMatrixValue,
       worldViewProjectionValue,
+      worldValue,
       colorValue,
-      lightDirectionValue,
+      lightPositionValue,
       uniformBuffer,
       uniformValues,
       bindGroup
@@ -351,18 +363,20 @@ async function main(): Promise<void> {
         const z: number = (v - 0.5) * deep * 150;
 
         const aimMatrix: Mat4x4.Mat4x4 = Mat4x4.aim([x, 0, z], settings.target, up);
+        worldValue.set(aimMatrix);
         const inverseTranspose: Mat4x4.Mat4x4 = Mat4x4.transpose(Mat4x4.inverse(aimMatrix));
         normalMatrixValue.set(Mat3x3.fromMat4(inverseTranspose));
         worldViewProjectionValue.set(Mat4x4.multiply(viewProjectionMatrix, aimMatrix));
       } else {
         const worldMatrix: Mat4x4.Mat4x4 = Mat4x4.translation(settings.target);
+        worldValue.set(worldMatrix);
         const inverseTranspose: Mat4x4.Mat4x4 = Mat4x4.transpose(Mat4x4.inverse(worldMatrix));
         normalMatrixValue.set(Mat3x3.fromMat4(inverseTranspose));
         worldViewProjectionValue.set(Mat4x4.translate(viewProjectionMatrix, settings.target));
       }
 
       colorValue.set([0.2, 1, 0.2, 1]);
-      lightDirectionValue.set(Vec3.normalize([-0.5, -0.7, -1]));
+      lightPositionValue.set([0, 200, 300]);
 
       device!.queue.writeBuffer(uniformBuffer, 0, uniformValues);
 
