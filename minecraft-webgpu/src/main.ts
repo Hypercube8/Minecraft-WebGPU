@@ -27,7 +27,9 @@ async function main(): Promise<void> {
         color: vec4f,
         lightPosition: vec3f,
         viewWorldPosition: vec3f,
-        shininess: f32
+        shininess: f32,
+        lightDirection: vec3f,
+        limit: f32
       };
 
       struct Vertex {
@@ -61,12 +63,17 @@ async function main(): Promise<void> {
         let normal = normalize(vsOut.normal);
         let surfaceToLightDirection = normalize(vsOut.surfaceToLight);
         let surfaceToViewDirection = normalize(vsOut.surfaceToView);
-
-        let light = dot(normal, surfaceToLightDirection);
         let halfVector = normalize(surfaceToLightDirection + surfaceToViewDirection);
 
-        var specular = dot(normal, halfVector);
-        specular = select(0.0, pow(specular, uni.shininess), specular > 0.0);
+        var light = 0.0;
+        var specular = 0.0;
+
+        let dotFromDirection = dot(surfaceToLightDirection, -uni.lightDirection);
+        if (dotFromDirection > uni.limit) {
+          light = dot(normal, surfaceToLightDirection);
+          specular = dot(normal, halfVector);
+          specular = select(0.0, pow(specular, uni.shininess), specular > 0.0);
+        }
 
         let color = uni.color.rgb * light + specular;
         return vec4f(color, uni.color.a);
@@ -220,13 +227,15 @@ async function main(): Promise<void> {
     lightPositionValue: Float32Array;
     viewWorldPositionValue: Float32Array;
     shininessValue: Float32Array;
+    lightDirectionValue: Float32Array;
+    limitValue: Float32Array;
     bindGroup: GPUBindGroup;
   }
 
   const numObjects: number = 5 * 5 + 1;
   const objectsInfos: ObjectInfo[] = []; 
   for (let i = 0; i < numObjects; ++i) {
-    const uniformBufferSize: number = (12 + 16 + 16 + 4 + 4 + 4) * 4;
+    const uniformBufferSize: number = (12 + 16 + 16 + 4 + 4 + 4 + 4) * 4;
     const uniformBuffer: GPUBuffer = device!.createBuffer({
       label: "uniforms",
       size: uniformBufferSize,
@@ -242,6 +251,8 @@ async function main(): Promise<void> {
     const kLightPositionOffset: number = 48;
     const kViewWorldPositionOffset: number = 52;
     const kShininessOffset: number = 55;
+    const kLightDirectionOffset: number = 56;
+    const kLimitOffset: number = 59;
  
     const normalMatrixValue: Float32Array = uniformValues.subarray(kNormalMatrixOffset, kNormalMatrixOffset + 12);
     const worldViewProjectionValue: Float32Array = uniformValues.subarray(kWorldViewProjectionOffset, kWorldViewProjectionOffset + 16);
@@ -250,6 +261,8 @@ async function main(): Promise<void> {
     const lightPositionValue: Float32Array = uniformValues.subarray(kLightPositionOffset, kLightPositionOffset + 3);
     const viewWorldPositionValue: Float32Array = uniformValues.subarray(kViewWorldPositionOffset, kViewWorldPositionOffset + 3);
     const shininessValue: Float32Array = uniformValues.subarray(kShininessOffset, kShininessOffset + 1);
+    const lightDirectionValue: Float32Array = uniformValues.subarray(kLightDirectionOffset, kLightDirectionOffset + 3);
+    const limitValue: Float32Array = uniformValues.subarray(kLimitOffset, kLimitOffset + 1);
 
     const bindGroup: GPUBindGroup = device!.createBindGroup({
       label: "bind group for object",
@@ -269,6 +282,8 @@ async function main(): Promise<void> {
       lightPositionValue,
       viewWorldPositionValue,
       shininessValue,
+      lightDirectionValue,
+      limitValue,
       bindGroup
     });
   }
@@ -296,7 +311,10 @@ async function main(): Promise<void> {
 
   interface MatrixSettings {
     target: Vec3.Vec3,
-    shininess: number
+    shininess: number,
+    limit: number,
+    aimOffsetX: number,
+    aimOffsetY: number
   }
 
   let height = 0;
@@ -305,7 +323,10 @@ async function main(): Promise<void> {
   const radius: number = 200;
   const settings: MatrixSettings = {
     target: [0, height, 300],
-    shininess: 30
+    shininess: 30,
+    limit: deg2Rad(70),
+    aimOffsetX: -10,
+    aimOffsetY: 10
   };
 
   let depthTexture: GPUTexture;
@@ -360,12 +381,27 @@ async function main(): Promise<void> {
       lightPositionValue,
       viewWorldPositionValue,
       shininessValue,
+      lightDirectionValue,
+      limitValue,
       uniformBuffer,
       uniformValues,
       bindGroup
     }, i) => {
+      colorValue.set([0.2, 1, 0.2, 1]);
+      lightPositionValue.set(settings.target);
       viewWorldPositionValue.set(eye);
       shininessValue[0] = settings.shininess;
+      limitValue[0] = Math.cos(settings.limit);
+
+      {
+        const mat: Mat4x4.Mat4x4 = Mat4x4.aim(settings.target, [
+          target[0] + settings.aimOffsetX,
+          target[1] + settings.aimOffsetY,
+          0
+        ],
+        up);
+        lightDirectionValue.set(mat.slice(8, 11));
+      }
 
       const deep: number = 5;
       const across: number = 5;
@@ -392,9 +428,6 @@ async function main(): Promise<void> {
         normalMatrixValue.set(Mat3x3.fromMat4(inverseTranspose));
         worldViewProjectionValue.set(Mat4x4.translate(viewProjectionMatrix, settings.target));
       }
-
-      colorValue.set([0.2, 1, 0.2, 1]);
-      lightPositionValue.set(settings.target);
 
       device!.queue.writeBuffer(uniformBuffer, 0, uniformValues);
 
