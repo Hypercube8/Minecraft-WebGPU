@@ -71,13 +71,13 @@ async function main(): Promise<void> {
   const y: number[] = [255, 255, 0, 255];
   const b: number[] = [0, 0, 255, 255];
   const textureData: Uint8Array = new Uint8Array([
+    _, _, _, _, _,
+    _, y, _, _, _,
+    _, y, _, _, _,
+    _, y, y, y, _,
+    _, y, _, _, _,
+    _, y, y, y, _,
     b, _, _, _, _,
-    _, y, y, y, _,
-    _, y, _, _, _,
-    _, y, y, y, _,
-    _, y, _, _, _,
-    _, y, _, _, _,
-    _, _, _, _, _
   ].flat());
 
   const texture: GPUTexture = device!.createTexture({
@@ -93,15 +93,38 @@ async function main(): Promise<void> {
     { width: kTextureWidth, height: kTextureHeight }
   );
 
-  const sampler: GPUSampler = device!.createSampler();
+  const bindGroups: GPUBindGroup[] = [];
+  for (let i = 0; i < 8; ++i) {
+    const sampler: GPUSampler = device!.createSampler({
+      addressModeU: (i & 1) ? "repeat" : "clamp-to-edge",
+      addressModeV: (i & 2) ? "repeat" : "clamp-to-edge",
+      magFilter: (i & 4) ? "linear" : "nearest"
+    });
 
-  const bindGroup: GPUBindGroup = device!.createBindGroup({
-    layout: pipeline.getBindGroupLayout(0),
-    entries: [
-      { binding: 0, resource: sampler },
-      { binding: 1, resource: texture.createView() }
-    ]
-  });
+    const bindGroup: GPUBindGroup = device!.createBindGroup({
+      layout: pipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: sampler },
+        { binding: 1, resource: texture.createView() }
+      ]
+    });
+    bindGroups.push(bindGroup);
+  }
+
+  type AddressMode = "repeat" | "clamp-to-edge";
+  type FilterMode = "linear" | "nearest";
+
+  interface SamplingSettings {
+    addressModeU: AddressMode,
+    addressModeV: AddressMode,
+    magFilter: FilterMode
+  }
+
+  const settings: SamplingSettings = {
+    addressModeU: "clamp-to-edge",
+    addressModeV: "clamp-to-edge",
+    magFilter: "nearest"
+  }
 
   const renderPassDescriptor: GPURenderPassDescriptor = {
     label: "our basic canvas renderPass",
@@ -116,6 +139,12 @@ async function main(): Promise<void> {
   };
 
   function render() {
+    const ndx: number = (settings.addressModeU === "repeat" ? 1 : 0) + 
+                        (settings.addressModeV === "repeat" ? 1 : 0) +
+                        (settings.magFilter === "linear" ? 4 : 0);
+    const bindGroup: GPUBindGroup = bindGroups[ndx];
+    
+
     (renderPassDescriptor.colorAttachments as any)[0].view = context!.getCurrentTexture().createView();
 
     const encoder: GPUCommandEncoder = device!.createCommandEncoder({ label: "our encoder" });
