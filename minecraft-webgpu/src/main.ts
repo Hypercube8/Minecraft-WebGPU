@@ -1,3 +1,66 @@
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+const mix = (a: Uint8Array, b: Uint8Array, t: number) => a.map((v, i) => lerp(v, b[i], t)); 
+const billinearFilter = (tl: Uint8Array, tr: Uint8Array, bl: Uint8Array, br: Uint8Array, t1: number, t2: number) => {
+  const t: Uint8Array = mix(tl, tr, t1);
+  const b: Uint8Array = mix(bl, br, t1);
+  return mix(t, b, t2);
+}
+
+interface MipTexture {
+  src: Uint8Array,
+  srcWidth: number,
+  srcHeight: number
+}
+
+const createNextMipLevelRgba8Unorm = (mip: MipTexture) => {
+    const dstWidth: number = Math.max(1, mip.srcWidth / 2 | 0);
+    const dstHeight: number = Math.max(1, mip.srcHeight / 2 | 0);
+    const dst: Uint8Array = new Uint8Array(dstWidth * dstHeight * 4);
+    
+    const getSrcPixel = (x: number, y: number) => {
+      const offset: number = (y * mip.srcWidth + x) * 4;
+      return mip.src.subarray(offset, offset + 4);
+    }
+
+    for (let y = 0; y < dstHeight; ++y) {
+      for (let x = 0; x < dstWidth; ++x) {
+        const u: number = (x + 0.5) / dstWidth;
+        const v: number = (y + 0.5) / dstHeight;
+
+        const au: number = (u * mip.srcWidth - 0.5);
+        const av: number = (v * mip.srcHeight - 0.5);
+
+        const tx: number = au | 0;
+        const ty: number = av | 0;
+
+        const t1: number = au % 1;
+        const t2: number = av % 1;
+
+        const tl: Uint8Array = getSrcPixel(tx, ty);
+        const tr: Uint8Array = getSrcPixel(tx + 1, ty);
+        const bl: Uint8Array = getSrcPixel(tx, ty + 1);
+        const br: Uint8Array = getSrcPixel(tx + 1, ty + 1);
+
+        const dstOffset: number = (y * dstWidth + x) * 4;
+        dst.set(billinearFilter(tl, tr, bl, br, t1, t2), dstOffset);
+      }
+    }
+    return { src: dst, srcWidth: dstWidth, srcHeight: dstHeight };
+}
+
+const generateMips = (src: Uint8Array, srcWidth: number) => {
+  const srcHeight: number = src.length / 4 / srcWidth;
+
+  let mip: MipTexture = { src, srcWidth, srcHeight };
+  const mips: MipTexture[] = [mip];
+
+  while (mip.srcWidth > 1 || mip.srcHeight > 1 ) {
+    mip = createNextMipLevelRgba8Unorm(mip);
+    mips.push(mip);
+  }
+  return mips;
+}
+
 async function main(): Promise<void> {
   const adapter: GPUAdapter | null = await navigator.gpu?.requestAdapter();
   const device: GPUDevice | undefined = await adapter?.requestDevice();
@@ -23,6 +86,13 @@ async function main(): Promise<void> {
         @location(0) texcoord: vec2f
       }
 
+      struct Uniforms {
+        scale: vec2f,
+        offset: vec2f
+      }
+
+      @group(0) @binding(2) var<uniform> uni: Uniforms; 
+
       @vertex fn vs(
         @builtin(vertex_index) vertexIndex : u32
       ) -> VSOutput {
@@ -38,7 +108,7 @@ async function main(): Promise<void> {
 
         var vsOutput: VSOutput;
         let xy = pos[vertexIndex];
-        vsOutput.position = vec4f(xy, 0.0, 1.0);
+        vsOutput.position = vec4f(xy * uni.scale + uni.offset, 0.0, 1.0);
         vsOutput.texcoord = xy;
         return vsOutput;
       }
@@ -80,18 +150,38 @@ async function main(): Promise<void> {
     b, _, _, _, _,
   ].flat());
 
+  const mips: MipTexture[] = generateMips(textureData, kTextureWidth);
+
   const texture: GPUTexture = device!.createTexture({
-    size: [kTextureWidth, kTextureHeight],
+    label: "yellow F on red",
+    size: [mips[0].srcWidth, mips[0].srcHeight],
+    mipLevelCount: mips.length,
     format: "rgba8unorm",
     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
   });
 
-  device!.queue.writeTexture(
-    {texture},
-    textureData,
-    { bytesPerRow: kTextureWidth * 4 },
-    { width: kTextureWidth, height: kTextureHeight }
-  );
+  mips.forEach(({src, srcWidth, srcHeight}, mipLevel) => {
+    device!.queue.writeTexture(
+      {texture, mipLevel},
+      src,
+      { bytesPerRow: srcWidth * 4 },
+      { width: srcWidth, height: srcHeight }
+    );
+  });
+
+  const uniformBufferSize: number = 
+    2 * 4 +
+    2 * 4;
+  const uniformBuffer: GPUBuffer = device!.createBuffer({
+    label: "uniforms for quad",
+    size: uniformBufferSize,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+  });
+
+  const uniformValues: Float32Array = new Float32Array(uniformBufferSize / 4);
+
+  const kScaleOffset: number = 0;
+  const kOffsetOffset: number = 2;
 
   const bindGroups: GPUBindGroup[] = [];
   for (let i = 0; i < 8; ++i) {
@@ -105,7 +195,8 @@ async function main(): Promise<void> {
       layout: pipeline.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: sampler },
-        { binding: 1, resource: texture.createView() }
+        { binding: 1, resource: texture.createView() },
+        { binding: 2, resource: { buffer: uniformBuffer }}
       ]
     });
     bindGroups.push(bindGroup);
@@ -142,6 +233,12 @@ async function main(): Promise<void> {
     const ndx: number = (settings.addressModeU === "repeat" ? 1 : 0) + 
                         (settings.addressModeV === "repeat" ? 1 : 0) +
                         (settings.magFilter === "linear" ? 4 : 0);
+
+    uniformValues.set([1, 1], kScaleOffset);
+    uniformValues.set([0, 0], kOffsetOffset);
+
+    device!.queue.writeBuffer(uniformBuffer, 0, uniformValues);
+
     const bindGroup: GPUBindGroup = bindGroups[ndx];
     
 
