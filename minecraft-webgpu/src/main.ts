@@ -1,3 +1,67 @@
+import { mat4, Mat4 } from "wgpu-matrix";
+
+const createBlendedMap = () => {
+  const w: number[] = [255, 255, 255, 255];
+  const r: number[] = [255, 0, 0, 255];
+  const b: number[] = [0, 28, 116, 255];
+  const y: number[] = [255, 231, 0, 255];
+  const g: number[] = [58, 181, 75, 255];
+  const a: number[] = [38, 123, 167, 255];
+  const data: Uint8Array = new Uint8Array([
+    w, r, r, r, r, r, r, a, a, r, r, r, r, r, r, w,
+    w, w, r, r, r, r, r, a, a, r, r, r, r, r, w, w,
+    w, w, w, r, r, r, r, a, a, r, r, r, r, w, w, w,
+    w, w, w, w, r, r, r, a, a, r, r, r, w, w, w, w,
+    w, w, w, w, w, r, r, a, a, r, r, w, w, w, w, w,
+    w, w, w, w, w, w, r, a, a, r, w, w, w, w, w, w,
+    w, w, w, w, w, w, w, a, a, w, w, w, w, w, w, w,
+    b, b, b, b, b, b, b, b, a, y, y, y, y, y, y, y,
+    b, b, b, b, b, b, b, g, y, y, y, y, y, y, y, y,
+    w, w, w, w, w, w, w, g, g, w, w, w, w, w, w, w,
+    w, w, w, w, w, w, r, g, g, r, w, w, w, w, w, w,
+    w, w, w, w, w, r, r, g, g, r, r, w, w, w, w, w,
+    w, w, w, w, r, r, r, g, g, r, r, r, w, w, w, w,
+    w, w, w, r, r, r, r, g, g, r, r, r, r, w, w, w,
+    w, w, r, r, r, r, r, g, g, r, r, r, r, r, w, w,
+    w, r, r, r, r, r, r, g, g, r, r, r, r, r, r, w,
+  ].flat());
+  return generateMips(data, 16);
+}
+
+const createCheckeredMap = () => {
+  const ctx: CanvasRenderingContext2D | null = document.createElement("canvas").getContext("2d", {willReadFrequently: true});
+  
+  interface Level {
+    size: number,
+    color: string
+  }
+
+  const levels: Level[] = [
+    { size: 64, color: "rgb(128,0,255)" },
+    { size: 32, color: "rgb(0,255,0)" },
+    { size: 16, color: "rgb(255,0,0)" },
+    { size:  8, color: "rgb(255,255,0)" },
+    { size:  4, color: "rgb(0,0,255)" },
+    { size:  2, color: "rgb(0,255,255)" },
+    { size:  1, color: "rgb(255,0,255)" }
+  ]
+  return levels.map(({size, color}, i) => {
+    ctx!.canvas.width = size;
+    ctx!.canvas.height = size;
+    ctx!.fillStyle = i & 1 ? "#000" : "fff";
+    ctx!.fillRect(0, 0, size, size);
+    ctx!.fillStyle = color;
+    ctx!.fillRect(0, 0, size/2, size/2);
+    ctx!.fillRect(size/2, size/2, size/2, size/2);
+    const imgData: ImageData = ctx!.getImageData(0, 0, size, size);
+    return {
+      src: new Uint8Array(imgData.data),
+      srcWidth: size,
+      srcHeight: size
+    }
+  });
+};
+
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const mix = (a: Uint8Array, b: Uint8Array, t: number) => a.map((v, i) => lerp(v, b[i], t)); 
 const billinearFilter = (tl: Uint8Array, tr: Uint8Array, bl: Uint8Array, br: Uint8Array, t1: number, t2: number) => {
@@ -59,7 +123,7 @@ const generateMips = (src: Uint8Array, srcWidth: number) => {
     mips.push(mip);
   }
   return mips;
-}
+}  
 
 async function main(): Promise<void> {
   const adapter: GPUAdapter | null = await navigator.gpu?.requestAdapter();
@@ -87,8 +151,7 @@ async function main(): Promise<void> {
       }
 
       struct Uniforms {
-        scale: vec2f,
-        offset: vec2f
+        matrix: mat4x4f
       }
 
       @group(0) @binding(2) var<uniform> uni: Uniforms; 
@@ -108,8 +171,8 @@ async function main(): Promise<void> {
 
         var vsOutput: VSOutput;
         let xy = pos[vertexIndex];
-        vsOutput.position = vec4f(xy * uni.scale + uni.offset, 0.0, 1.0);
-        vsOutput.texcoord = xy;
+        vsOutput.position = uni.matrix * vec4f(xy, 0.0, 1.0);
+        vsOutput.texcoord = xy * vec2f(1, 50);
         return vsOutput;
       }
 
@@ -134,72 +197,76 @@ async function main(): Promise<void> {
     }
   });
 
-  const kTextureWidth: number = 5;
-  const kTextureHeight: number = 7;
+  const createTextureWithMips = (mips: MipTexture[], label: string) => {
+    const texture = device.createTexture({
+      label,
+      size: [mips[0].srcWidth, mips[0].srcHeight],
+      mipLevelCount: mips.length,
+      format: "rgba8unorm",
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
+    });
+    mips.forEach(({src, srcWidth, srcHeight}, mipLevel) => {
+      device!.queue.writeTexture(
+        { texture, mipLevel },
+        src,
+        { bytesPerRow: srcWidth * 4},
+        { width: srcWidth, height: srcHeight }
+      );
+    }); 
+    return texture;
+  };
 
-  const _: number[] = [255, 0, 0, 255];
-  const y: number[] = [255, 255, 0, 255];
-  const b: number[] = [0, 0, 255, 255];
-  const textureData: Uint8Array = new Uint8Array([
-    _, _, _, _, _,
-    _, y, _, _, _,
-    _, y, _, _, _,
-    _, y, y, y, _,
-    _, y, _, _, _,
-    _, y, y, y, _,
-    b, _, _, _, _,
-  ].flat());
+  const textures: GPUTexture[] = [
+    createTextureWithMips(createBlendedMap(), "blended"),
+    createTextureWithMips(createCheckeredMap(), "checkered")
+  ]; 
 
-  const mips: MipTexture[] = generateMips(textureData, kTextureWidth);
+  interface ObjectInfo {
+    bindGroups: GPUBindGroup[],
+    matrix: Mat4,
+    uniformValues: Float32Array,
+    uniformBuffer: GPUBuffer
+  }
 
-  const texture: GPUTexture = device!.createTexture({
-    label: "yellow F on red",
-    size: [mips[0].srcWidth, mips[0].srcHeight],
-    mipLevelCount: mips.length,
-    format: "rgba8unorm",
-    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
-  });
+  const kMatrixOffset: number = 0;
 
-  mips.forEach(({src, srcWidth, srcHeight}, mipLevel) => {
-    device!.queue.writeTexture(
-      {texture, mipLevel},
-      src,
-      { bytesPerRow: srcWidth * 4 },
-      { width: srcWidth, height: srcHeight }
-    );
-  });
-
-  const uniformBufferSize: number = 
-    2 * 4 +
-    2 * 4;
-  const uniformBuffer: GPUBuffer = device!.createBuffer({
-    label: "uniforms for quad",
-    size: uniformBufferSize,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
-  });
-
-  const uniformValues: Float32Array = new Float32Array(uniformBufferSize / 4);
-
-  const kScaleOffset: number = 0;
-  const kOffsetOffset: number = 2;
-
-  const bindGroups: GPUBindGroup[] = [];
+  const objectInfos: ObjectInfo[] = [];
   for (let i = 0; i < 8; ++i) {
     const sampler: GPUSampler = device!.createSampler({
-      addressModeU: (i & 1) ? "repeat" : "clamp-to-edge",
-      addressModeV: (i & 2) ? "repeat" : "clamp-to-edge",
-      magFilter: (i & 4) ? "linear" : "nearest"
+      addressModeU: "repeat",
+      addressModeV: "repeat",
+      magFilter: (i & 1) ? "linear" : "nearest",
+      minFilter: (i & 2) ? "linear" : "nearest",
+      mipmapFilter: (i & 4) ? "linear" : "nearest"
     });
 
-    const bindGroup: GPUBindGroup = device!.createBindGroup({
-      layout: pipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: sampler },
-        { binding: 1, resource: texture.createView() },
-        { binding: 2, resource: { buffer: uniformBuffer }}
-      ]
+    const uniformBufferSize: number = 
+      16 * 4;
+    const uniformBuffer: GPUBuffer = device!.createBuffer({
+      label: "uniforms for quad",
+      size: uniformBufferSize,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
     });
-    bindGroups.push(bindGroup);
+
+    const uniformValues: Float32Array = new Float32Array(uniformBufferSize / 4);
+    const matrix: Mat4 = uniformValues.subarray(kMatrixOffset, 16);
+
+    const bindGroups: GPUBindGroup[] = textures.map(texture =>
+      device!.createBindGroup({
+        layout: pipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: sampler },
+          { binding: 1, resource: texture.createView() },
+          { binding: 2, resource: { buffer: uniformBuffer }} 
+        ]
+    }));
+
+    objectInfos.push({
+      bindGroups,
+      matrix,
+      uniformValues,
+      uniformBuffer
+    });
   }
 
   type AddressMode = "repeat" | "clamp-to-edge";
@@ -229,27 +296,54 @@ async function main(): Promise<void> {
     ]
   };
 
+  let texNdx: number = 0;
+
+  canvas!.addEventListener("click", () => {
+    texNdx = (texNdx + 1) % textures.length;
+    render();
+  });
+
   function render() {
-    const ndx: number = (settings.addressModeU === "repeat" ? 1 : 0) + 
-                        (settings.addressModeV === "repeat" ? 1 : 0) +
-                        (settings.magFilter === "linear" ? 4 : 0);
+    const fov: number = 60 * Math.PI / 180;
+    const aspect: number =  canvas!.clientWidth / canvas!.clientHeight;
+    const zNear: number = 1;
+    const zFar: number = 2000;
+    const projectionMatrix: Mat4 = mat4.perspective(fov, aspect, zNear, zFar);
 
-    uniformValues.set([1, 1], kScaleOffset);
-    uniformValues.set([0, 0], kOffsetOffset);
-
-    device!.queue.writeBuffer(uniformBuffer, 0, uniformValues);
-
-    const bindGroup: GPUBindGroup = bindGroups[ndx];
+    const cameraPosition: number[] = [0, 0, 2];
+    const up: number[] = [0, 1, 0];
+    const target: number[] = [0, 0, 0];
+    const cameraMatrix: Mat4 = mat4.lookAt(cameraPosition, target, up);
+    const viewMatrix: Mat4 = mat4.inverse(cameraMatrix);
+    const viewProjectionMatrix: Mat4 = mat4.multiply(projectionMatrix, viewMatrix);    
     
-
     (renderPassDescriptor.colorAttachments as any)[0].view = context!.getCurrentTexture().createView();
 
     const encoder: GPUCommandEncoder = device!.createCommandEncoder({ label: "our encoder" });
     const pass: GPURenderPassEncoder = encoder.beginRenderPass(renderPassDescriptor);
 
     pass.setPipeline(pipeline);
-    pass.setBindGroup(0, bindGroup);
-    pass.draw(6);
+
+    objectInfos.forEach(({bindGroups, matrix, uniformBuffer, uniformValues}, i) => {
+      const bindGroup: GPUBindGroup = bindGroups[texNdx];
+
+      const xSpacing: number = 1.2;
+      const ySpacing: number = 0.7;
+      const zDepth: number = 50;
+
+      const x: number = i % 4 - 1.5;
+      const y: number = i < 4 ? 1 : -1;
+
+      mat4.translate(viewProjectionMatrix, [x * xSpacing, y * ySpacing, -zDepth * 0.5], matrix);
+      mat4.rotateX(matrix, 0.5 * Math.PI, matrix);
+      mat4.scale(matrix, [1, zDepth * 2, 1], matrix);
+      mat4.translate(matrix, [-0.5, -0.5, 0], matrix);
+
+      device!.queue.writeBuffer(uniformBuffer, 0, uniformValues);
+      pass.setBindGroup(0, bindGroup);
+      pass.draw(6);
+    });
+
     pass.end();
 
     const commandBuffer: GPUCommandBuffer = encoder.finish();
