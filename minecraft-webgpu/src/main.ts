@@ -1,129 +1,47 @@
 import { mat4, Mat4 } from "wgpu-matrix";
+import { MipMapping } from "./mipmapping";
+import texturedQuadShader from "/shaders/textured_quad.wgsl?raw";
 
-const createBlendedMap = () => {
-  const w: number[] = [255, 255, 255, 255];
-  const r: number[] = [255, 0, 0, 255];
-  const b: number[] = [0, 28, 116, 255];
-  const y: number[] = [255, 231, 0, 255];
-  const g: number[] = [58, 181, 75, 255];
-  const a: number[] = [38, 123, 167, 255];
-  const data: Uint8Array = new Uint8Array([
-    w, r, r, r, r, r, r, a, a, r, r, r, r, r, r, w,
-    w, w, r, r, r, r, r, a, a, r, r, r, r, r, w, w,
-    w, w, w, r, r, r, r, a, a, r, r, r, r, w, w, w,
-    w, w, w, w, r, r, r, a, a, r, r, r, w, w, w, w,
-    w, w, w, w, w, r, r, a, a, r, r, w, w, w, w, w,
-    w, w, w, w, w, w, r, a, a, r, w, w, w, w, w, w,
-    w, w, w, w, w, w, w, a, a, w, w, w, w, w, w, w,
-    b, b, b, b, b, b, b, b, a, y, y, y, y, y, y, y,
-    b, b, b, b, b, b, b, g, y, y, y, y, y, y, y, y,
-    w, w, w, w, w, w, w, g, g, w, w, w, w, w, w, w,
-    w, w, w, w, w, w, r, g, g, r, w, w, w, w, w, w,
-    w, w, w, w, w, r, r, g, g, r, r, w, w, w, w, w,
-    w, w, w, w, r, r, r, g, g, r, r, r, w, w, w, w,
-    w, w, w, r, r, r, r, g, g, r, r, r, r, w, w, w,
-    w, w, r, r, r, r, r, g, g, r, r, r, r, r, w, w,
-    w, r, r, r, r, r, r, g, g, r, r, r, r, r, r, w,
-  ].flat());
-  return generateMips(data, 16);
+async function loadImageBitmap(url: string): Promise<ImageBitmap> {
+  const res: Response = await fetch(url);
+  const blob: Blob = await res.blob();
+  return await createImageBitmap(blob, { colorSpaceConversion: "none" });
 }
 
-const createCheckeredMap = () => {
-  const ctx: CanvasRenderingContext2D | null = document.createElement("canvas").getContext("2d", {willReadFrequently: true});
-  
-  interface Level {
-    size: number,
-    color: string
-  }
+interface TextureOptions {
+  flipY: boolean,
+  mips: boolean
+}
 
-  const levels: Level[] = [
-    { size: 64, color: "rgb(128,0,255)" },
-    { size: 32, color: "rgb(0,255,0)" },
-    { size: 16, color: "rgb(255,0,0)" },
-    { size:  8, color: "rgb(255,255,0)" },
-    { size:  4, color: "rgb(0,0,255)" },
-    { size:  2, color: "rgb(0,255,255)" },
-    { size:  1, color: "rgb(255,0,255)" }
-  ]
-  return levels.map(({size, color}, i) => {
-    ctx!.canvas.width = size;
-    ctx!.canvas.height = size;
-    ctx!.fillStyle = i & 1 ? "#000" : "fff";
-    ctx!.fillRect(0, 0, size, size);
-    ctx!.fillStyle = color;
-    ctx!.fillRect(0, 0, size/2, size/2);
-    ctx!.fillRect(size/2, size/2, size/2, size/2);
-    const imgData: ImageData = ctx!.getImageData(0, 0, size, size);
-    return {
-      src: new Uint8Array(imgData.data),
-      srcWidth: size,
-      srcHeight: size
-    }
+function copySourceToTexture(device: GPUDevice, texture: GPUTexture, source: ImageBitmap, options: Partial<TextureOptions>) {
+  device.queue.copyExternalImageToTexture(
+    { source, flipY: options.flipY },
+    { texture },
+    { width: source.width, height: source.height }
+  );
+
+  if (texture.mipLevelCount > 1) {
+    MipMapping.generateMips(device, texture);
+  }
+}
+
+function createTextureFromSource(device: GPUDevice, source: ImageBitmap, options: Partial<TextureOptions>): GPUTexture {
+  const texture: GPUTexture = device!.createTexture({
+    format: "rgba8unorm",
+    mipLevelCount: options.mips ? MipMapping.numMipLevels(source.width, source.height) : 1,
+    size: [source.width, source.height],
+    usage: GPUTextureUsage.TEXTURE_BINDING |
+           GPUTextureUsage.COPY_DST |
+           GPUTextureUsage.RENDER_ATTACHMENT
   });
-};
-
-const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
-const mix = (a: Uint8Array, b: Uint8Array, t: number) => a.map((v, i) => lerp(v, b[i], t)); 
-const billinearFilter = (tl: Uint8Array, tr: Uint8Array, bl: Uint8Array, br: Uint8Array, t1: number, t2: number) => {
-  const t: Uint8Array = mix(tl, tr, t1);
-  const b: Uint8Array = mix(bl, br, t1);
-  return mix(t, b, t2);
+  copySourceToTexture(device, texture, source, options);
+  return texture;
 }
 
-interface MipTexture {
-  src: Uint8Array,
-  srcWidth: number,
-  srcHeight: number
+async function createTextureFromImage(device: GPUDevice, url: string, options: Partial<TextureOptions>) {
+  const imgBitmap: ImageBitmap = await loadImageBitmap(url);
+  return createTextureFromSource(device, imgBitmap, options);
 }
-
-const createNextMipLevelRgba8Unorm = (mip: MipTexture) => {
-    const dstWidth: number = Math.max(1, mip.srcWidth / 2 | 0);
-    const dstHeight: number = Math.max(1, mip.srcHeight / 2 | 0);
-    const dst: Uint8Array = new Uint8Array(dstWidth * dstHeight * 4);
-    
-    const getSrcPixel = (x: number, y: number) => {
-      const offset: number = (y * mip.srcWidth + x) * 4;
-      return mip.src.subarray(offset, offset + 4);
-    }
-
-    for (let y = 0; y < dstHeight; ++y) {
-      for (let x = 0; x < dstWidth; ++x) {
-        const u: number = (x + 0.5) / dstWidth;
-        const v: number = (y + 0.5) / dstHeight;
-
-        const au: number = (u * mip.srcWidth - 0.5);
-        const av: number = (v * mip.srcHeight - 0.5);
-
-        const tx: number = au | 0;
-        const ty: number = av | 0;
-
-        const t1: number = au % 1;
-        const t2: number = av % 1;
-
-        const tl: Uint8Array = getSrcPixel(tx, ty);
-        const tr: Uint8Array = getSrcPixel(tx + 1, ty);
-        const bl: Uint8Array = getSrcPixel(tx, ty + 1);
-        const br: Uint8Array = getSrcPixel(tx + 1, ty + 1);
-
-        const dstOffset: number = (y * dstWidth + x) * 4;
-        dst.set(billinearFilter(tl, tr, bl, br, t1, t2), dstOffset);
-      }
-    }
-    return { src: dst, srcWidth: dstWidth, srcHeight: dstHeight };
-}
-
-const generateMips = (src: Uint8Array, srcWidth: number) => {
-  const srcHeight: number = src.length / 4 / srcWidth;
-
-  let mip: MipTexture = { src, srcWidth, srcHeight };
-  const mips: MipTexture[] = [mip];
-
-  while (mip.srcWidth > 1 || mip.srcHeight > 1 ) {
-    mip = createNextMipLevelRgba8Unorm(mip);
-    mips.push(mip);
-  }
-  return mips;
-}  
 
 async function main(): Promise<void> {
   const adapter: GPUAdapter | null = await navigator.gpu?.requestAdapter();
@@ -144,45 +62,7 @@ async function main(): Promise<void> {
 
   const module: GPUShaderModule = device.createShaderModule({
     label: 'hardcoded textured quad shader',
-    code: /* wgsl */`
-      struct VSOutput {
-        @builtin(position) position: vec4f,
-        @location(0) texcoord: vec2f
-      }
-
-      struct Uniforms {
-        matrix: mat4x4f
-      }
-
-      @group(0) @binding(2) var<uniform> uni: Uniforms; 
-
-      @vertex fn vs(
-        @builtin(vertex_index) vertexIndex : u32
-      ) -> VSOutput {
-        let pos = array(
-          vec2f(0.0, 0.0),
-          vec2f(1.0, 0.0),
-          vec2f(0.0, 1.0),
-
-          vec2f(0.0, 1.0),
-          vec2f(1.0, 0.0),
-          vec2f(1.0, 1.0)
-        );
-
-        var vsOutput: VSOutput;
-        let xy = pos[vertexIndex];
-        vsOutput.position = uni.matrix * vec4f(xy, 0.0, 1.0);
-        vsOutput.texcoord = xy * vec2f(1, 50);
-        return vsOutput;
-      }
-
-      @group(0) @binding(0) var ourSampler: sampler;
-      @group(0) @binding(1) var ourTexture: texture_2d<f32>; 
-
-      @fragment fn fs(vsOut: VSOutput) -> @location(0) vec4f {
-        return textureSample(ourTexture, ourSampler, vsOut.texcoord);
-      }
-  `
+    code: texturedQuadShader
   });
 
   const pipeline: GPURenderPipeline = device.createRenderPipeline({
@@ -197,29 +77,14 @@ async function main(): Promise<void> {
     }
   });
 
-  const createTextureWithMips = (mips: MipTexture[], label: string) => {
-    const texture = device.createTexture({
-      label,
-      size: [mips[0].srcWidth, mips[0].srcHeight],
-      mipLevelCount: mips.length,
-      format: "rgba8unorm",
-      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
-    });
-    mips.forEach(({src, srcWidth, srcHeight}, mipLevel) => {
-      device!.queue.writeTexture(
-        { texture, mipLevel },
-        src,
-        { bytesPerRow: srcWidth * 4},
-        { width: srcWidth, height: srcHeight }
-      );
-    }); 
-    return texture;
-  };
-
-  const textures: GPUTexture[] = [
-    createTextureWithMips(createBlendedMap(), "blended"),
-    createTextureWithMips(createCheckeredMap(), "checkered")
-  ]; 
+  const textures: GPUTexture[] = await Promise.all([
+    await createTextureFromImage(device,
+        "/images/f-texture.png", {mips: true, flipY: false}),
+    await createTextureFromImage(device, 
+        "/images/coins.jpg", {mips: true}),
+    await createTextureFromImage(device,
+        "/images/Granite_paving_tileable_512x512.jpeg", {mips: true})
+  ]);
 
   interface ObjectInfo {
     bindGroups: GPUBindGroup[],
@@ -267,21 +132,6 @@ async function main(): Promise<void> {
       uniformValues,
       uniformBuffer
     });
-  }
-
-  type AddressMode = "repeat" | "clamp-to-edge";
-  type FilterMode = "linear" | "nearest";
-
-  interface SamplingSettings {
-    addressModeU: AddressMode,
-    addressModeV: AddressMode,
-    magFilter: FilterMode
-  }
-
-  const settings: SamplingSettings = {
-    addressModeU: "clamp-to-edge",
-    addressModeV: "clamp-to-edge",
-    magFilter: "nearest"
   }
 
   const renderPassDescriptor: GPURenderPassDescriptor = {
