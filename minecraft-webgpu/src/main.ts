@@ -2,6 +2,31 @@ import { mat4, Mat4 } from "wgpu-matrix";
 import { MipMapping } from "./mipmapping";
 import texturedQuadShader from "/shaders/textured_quad.wgsl?raw";
 
+const size: number = 256;
+const half: number = size / 2;
+
+const ctx: CanvasRenderingContext2D | null = document.createElement("canvas").getContext("2d");
+ctx!.canvas.width = size;
+ctx!.canvas.height = size;
+
+const hsl = (h: number, s: number, l: number) => `hsl(${h * 360 | 0}, ${s * 100}%, ${l * 100 | 0}%)`
+
+function update2DCanvas(time: number) {
+  time *= 0.0001;
+  ctx!.clearRect(0, 0, size, size);
+  ctx!.save();
+  ctx!.translate(half, half);
+  const num: number = 20;
+  for (let i = 0; i < num; ++i) {
+    ctx!.fillStyle = hsl(i / num * 0.2 + time * 0.1, 1, i % 2 * 0.5);
+    ctx!.fillRect(-half, -half, size, size);
+    ctx!.rotate(time * 0.5);
+    ctx!.scale(0.85, 0.85);
+    ctx!.translate(size / 16, 0);
+  }
+  ctx!.restore();
+}
+
 async function loadImageBitmap(url: string): Promise<ImageBitmap> {
   const res: Response = await fetch(url);
   const blob: Blob = await res.blob();
@@ -13,7 +38,7 @@ interface TextureOptions {
   mips: boolean
 }
 
-function copySourceToTexture(device: GPUDevice, texture: GPUTexture, source: ImageBitmap, options: Partial<TextureOptions>) {
+function copySourceToTexture(device: GPUDevice, texture: GPUTexture, source: ImageBitmap | HTMLCanvasElement, options: Partial<TextureOptions>) {
   device.queue.copyExternalImageToTexture(
     { source, flipY: options.flipY },
     { texture },
@@ -25,7 +50,7 @@ function copySourceToTexture(device: GPUDevice, texture: GPUTexture, source: Ima
   }
 }
 
-function createTextureFromSource(device: GPUDevice, source: ImageBitmap, options: Partial<TextureOptions>): GPUTexture {
+function createTextureFromSource(device: GPUDevice, source: ImageBitmap | HTMLCanvasElement, options: Partial<TextureOptions>): GPUTexture {
   const texture: GPUTexture = device!.createTexture({
     format: "rgba8unorm",
     mipLevelCount: options.mips ? MipMapping.numMipLevels(source.width, source.height) : 1,
@@ -77,13 +102,10 @@ async function main(): Promise<void> {
     }
   });
 
+  const texture = createTextureFromSource(device, ctx!.canvas, {mips: true});
+
   const textures: GPUTexture[] = await Promise.all([
-    await createTextureFromImage(device,
-        "/images/f-texture.png", {mips: true, flipY: false}),
-    await createTextureFromImage(device, 
-        "/images/coins.jpg", {mips: true}),
-    await createTextureFromImage(device,
-        "/images/Granite_paving_tileable_512x512.jpeg", {mips: true})
+    texture
   ]);
 
   interface ObjectInfo {
@@ -150,10 +172,9 @@ async function main(): Promise<void> {
 
   canvas!.addEventListener("click", () => {
     texNdx = (texNdx + 1) % textures.length;
-    render();
   });
 
-  function render() {
+  function render(time: number) {
     const fov: number = 60 * Math.PI / 180;
     const aspect: number =  canvas!.clientWidth / canvas!.clientHeight;
     const zNear: number = 1;
@@ -198,6 +219,10 @@ async function main(): Promise<void> {
 
     const commandBuffer: GPUCommandBuffer = encoder.finish();
     device!.queue.submit([commandBuffer]);
+
+    update2DCanvas(time);
+    copySourceToTexture(device!, texture, ctx!.canvas, {});
+    requestAnimationFrame(render);
   }
 
   const observer: ResizeObserver = new ResizeObserver(entries => {
@@ -208,9 +233,9 @@ async function main(): Promise<void> {
       canvas.width = Math.max(1, Math.min(width, device.limits.maxTextureDimension2D));
       canvas.height = Math.max(1, Math.min(height, device.limits.maxTextureDimension2D));
     }
-    render();
   });
   observer.observe(canvas as Element);
+  render(0);
 }
 
 main();  
