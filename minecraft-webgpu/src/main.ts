@@ -2,29 +2,32 @@ import { mat4, Mat4 } from "wgpu-matrix";
 import { MipMapping } from "./mipmapping";
 import texturedQuadShader from "/shaders/textured_quad.wgsl?raw";
 
-const size: number = 256;
-const half: number = size / 2;
+async function startPlayingAndWaitForVideo(video: HTMLVideoElement) {
+  return new Promise((resolve, reject) => {
+    video.addEventListener("error", reject);
+    if ("requestVideoFrameCallback" in video) {
+      video.requestVideoFrameCallback(resolve);
+    }
+    video.play().catch(reject);
+  })
+}
 
-const ctx: CanvasRenderingContext2D | null = document.createElement("canvas").getContext("2d");
-ctx!.canvas.width = size;
-ctx!.canvas.height = size;
+type ImageSource = ImageBitmap |
+                   HTMLCanvasElement |
+                   HTMLVideoElement
 
-const hsl = (h: number, s: number, l: number) => `hsl(${h * 360 | 0}, ${s * 100}%, ${l * 100 | 0}%)`
-
-function update2DCanvas(time: number) {
-  time *= 0.0001;
-  ctx!.clearRect(0, 0, size, size);
-  ctx!.save();
-  ctx!.translate(half, half);
-  const num: number = 20;
-  for (let i = 0; i < num; ++i) {
-    ctx!.fillStyle = hsl(i / num * 0.2 + time * 0.1, 1, i % 2 * 0.5);
-    ctx!.fillRect(-half, -half, size, size);
-    ctx!.rotate(time * 0.5);
-    ctx!.scale(0.85, 0.85);
-    ctx!.translate(size / 16, 0);
+function getSourceSize(source: ImageSource): number[] {
+  if ("videoWidth" in source) {
+    return [
+      source.videoWidth,
+      source.videoHeight
+    ]
+  } else {
+    return [
+      source.width,
+      source.height
+    ]
   }
-  ctx!.restore();
 }
 
 async function loadImageBitmap(url: string): Promise<ImageBitmap> {
@@ -38,11 +41,11 @@ interface TextureOptions {
   mips: boolean
 }
 
-function copySourceToTexture(device: GPUDevice, texture: GPUTexture, source: ImageBitmap | HTMLCanvasElement, options: Partial<TextureOptions>) {
+function copySourceToTexture(device: GPUDevice, texture: GPUTexture, source: ImageSource, options: Partial<TextureOptions>) {
   device.queue.copyExternalImageToTexture(
     { source, flipY: options.flipY },
     { texture },
-    { width: source.width, height: source.height }
+    getSourceSize(source)
   );
 
   if (texture.mipLevelCount > 1) {
@@ -50,11 +53,12 @@ function copySourceToTexture(device: GPUDevice, texture: GPUTexture, source: Ima
   }
 }
 
-function createTextureFromSource(device: GPUDevice, source: ImageBitmap | HTMLCanvasElement, options: Partial<TextureOptions>): GPUTexture {
+function createTextureFromSource(device: GPUDevice, source: ImageSource, options: Partial<TextureOptions>): GPUTexture {
+  const size: number[] = getSourceSize(source);
   const texture: GPUTexture = device!.createTexture({
     format: "rgba8unorm",
-    mipLevelCount: options.mips ? MipMapping.numMipLevels(source.width, source.height) : 1,
-    size: [source.width, source.height],
+    mipLevelCount: options.mips ? MipMapping.numMipLevels(...size) : 1,
+    size,
     usage: GPUTextureUsage.TEXTURE_BINDING |
            GPUTextureUsage.COPY_DST |
            GPUTextureUsage.RENDER_ATTACHMENT
@@ -102,7 +106,25 @@ async function main(): Promise<void> {
     }
   });
 
-  const texture = createTextureFromSource(device, ctx!.canvas, {mips: true});
+  const video: HTMLVideoElement = document.createElement("video");
+  video.muted = true;
+  video.loop = true;
+  video.preload = "auto";
+  video.src = "/videos/Golden_retriever_swimming_the_doggy_paddle-360-no-audio.webm";
+  await startPlayingAndWaitForVideo(video);
+
+  let alwaysUpdateVideo: boolean = !("requestVideoFrameCallback" in video);
+  let haveNewVideoFrame: boolean = false;
+
+  if (!alwaysUpdateVideo) {
+    function recordHaveNewFrame() {
+      haveNewVideoFrame = true;
+      video.requestVideoFrameCallback(recordHaveNewFrame);
+    }
+    video.requestVideoFrameCallback(recordHaveNewFrame);
+  }
+
+  const texture: GPUTexture = createTextureFromSource(device!, video, {mips: true});
 
   const textures: GPUTexture[] = await Promise.all([
     texture
@@ -174,7 +196,7 @@ async function main(): Promise<void> {
     texNdx = (texNdx + 1) % textures.length;
   });
 
-  function render(time: number) {
+  function render() {
     const fov: number = 60 * Math.PI / 180;
     const aspect: number =  canvas!.clientWidth / canvas!.clientHeight;
     const zNear: number = 1;
@@ -220,8 +242,9 @@ async function main(): Promise<void> {
     const commandBuffer: GPUCommandBuffer = encoder.finish();
     device!.queue.submit([commandBuffer]);
 
-    update2DCanvas(time);
-    copySourceToTexture(device!, texture, ctx!.canvas, {});
+    if (alwaysUpdateVideo || haveNewVideoFrame) {
+      copySourceToTexture(device!, texture, video, {});
+    }
     requestAnimationFrame(render);
   }
 
@@ -235,7 +258,7 @@ async function main(): Promise<void> {
     }
   });
   observer.observe(canvas as Element);
-  render(0);
+  render();
 }
 
 main();  
