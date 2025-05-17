@@ -162,11 +162,12 @@ async function main(): Promise<void> {
   });
 
   const video = document.createElement("video");
-  video.muted = true;
-  video.loop = true;
-  video.preload = "auto";
-  video.crossOrigin = "anonymous"
-  video.src = "https://webgpufundamentals.org/webgpu/resources/videos/pexels-anna-bondarenko-5534310 (540p).mp4";
+
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: true
+  });
+  video.srcObject = stream;
+
   await startPlayingAndWaitForVideo(video);
 
   interface ObjectInfo {
