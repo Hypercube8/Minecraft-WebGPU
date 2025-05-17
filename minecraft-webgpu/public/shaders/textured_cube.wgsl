@@ -1,28 +1,42 @@
-struct Uniforms {
-    matrix: mat4x4f
-}
-
-struct Vertex {
-    @location(0) position: vec4f,
-    @location(1) texcoord: vec2f
-}
-
-struct VSOutput {
+struct OurVertexShaderOutput {
     @builtin(position) position: vec4f,
     @location(0) texcoord: vec2f
 }
 
-@group(0) @binding(0) var<uniform> uni: Uniforms; 
-@group(0) @binding(1) var ourSampler: sampler;
-@group(0) @binding(2) var ourTexture: texture_2d<f32>;
-
-@vertex fn vs(vert: Vertex) -> VSOutput {
-    var vsOut: VSOutput;
-    vsOut.position = uni.matrix * vert.position;
-    vsOut.texcoord = vert.texcoord;
-    return vsOut;
+struct Uniforms {
+    matrix: mat4x4f
 }
 
-@fragment fn fs(vsOut: VSOutput) -> @location(0) vec4f {
-    return textureSample(ourTexture, ourSampler, vsOut.texcoord);
+@group(0) @binding(2) var<uniform> uni: Uniforms; 
+
+@vertex fn vs(
+    @builtin(vertex_index) vertexIndex : u32
+) -> OurVertexShaderOutput {
+    let pos = array(
+        vec2f(0.0, 0.0), 
+        vec2f(1.0, 0.0),
+        vec2f(0.0, 1.0),
+
+        vec2f(0.0, 1.0),
+        vec2f(1.0, 0.0),
+        vec2f(1.0, 1.0)
+    );
+
+    var vsOutput: OurVertexShaderOutput;
+    let xy = pos[vertexIndex];
+    vsOutput.position = uni.matrix * vec4f(xy, 0.0, 1.0);
+
+    vsOutput.texcoord = xy;
+    return vsOutput;
+}
+
+@group(0) @binding(0) var ourSampler: sampler;
+@group(0) @binding(1) var ourTexture: texture_external;
+
+@fragment fn fs(fsInput: OurVertexShaderOutput) -> @location(0) vec4f {
+    return textureSampleBaseClampToEdge(
+        ourTexture,
+        ourSampler,
+        fsInput.texcoord
+    );
 }

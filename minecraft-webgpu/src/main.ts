@@ -1,4 +1,4 @@
-import { mat4 } from "wgpu-matrix";
+import { Mat4, mat4 } from "wgpu-matrix";
 import { MipMapping } from "./mipmapping";
 import texturedCubeShader from "/shaders/textured_cube.wgsl?raw";
 
@@ -153,78 +153,57 @@ async function main(): Promise<void> {
     label: "hardcoded textured cube pipeline",
     layout: "auto",
     vertex: {
-      module,
-      buffers: [
-        {
-          arrayStride: (3 + 2) * 4,
-          attributes: [
-            {shaderLocation: 0, offset: 0, format: "float32x3"},
-            {shaderLocation: 1, offset: 12, format: "float32x2"}
-          ] 
-        }
-      ]
+      module
     },
     fragment: {
       module,
       targets: [{ format: presentationFormat }]
-    },
-    primitive: {
-      cullMode: "back"
-    },
-    depthStencil: {
-      depthWriteEnabled: true,
-      depthCompare: "less",
-      format: "depth24plus"
     }
   });
 
-  const { vertexData, indexData, numVertices } = createCubeVertices();
-  const vertexBuffer: GPUBuffer = device!.createBuffer({
-    label: "vertex buffer vertices",
-    size: vertexData.byteLength,
-    usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
-  });
-  device!.queue.writeBuffer(vertexBuffer, 0, vertexData);
+  const video = document.createElement("video");
+  video.muted = true;
+  video.loop = true;
+  video.preload = "auto";
+  video.crossOrigin = "anonymous"
+  video.src = "https://webgpufundamentals.org/webgpu/resources/videos/pexels-anna-bondarenko-5534310 (540p).mp4";
+  await startPlayingAndWaitForVideo(video);
 
-  const indexBuffer: GPUBuffer = device!.createBuffer({
-    label: "index buffer",
-    size: vertexData.byteLength,
-    usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST
-  });
-  device!.queue.writeBuffer(indexBuffer, 0, indexData);
+  interface ObjectInfo {
+    sampler: GPUSampler,
+    matrix: Mat4,
+    uniformValues: Float32Array,
+    uniformBuffer: GPUBuffer
+  }
 
-  const texture: GPUTexture = await createTextureFromImage(device!, 
-    "/images/noodles.jpg", {mips: true, flipY: false});
+  const objectInfos: ObjectInfo[] = [];
+  for (let i = 0; i < 4; ++i) {
+    const sampler: GPUSampler = device!.createSampler({
+      addressModeU: "repeat",
+      addressModeV: "repeat",
+      magFilter: (i % 1) ? "linear" : "nearest",
+      minFilter: (i % 2) ? "linear" : "nearest"
+    });
 
-  const sampler: GPUSampler = device!.createSampler({
-    magFilter: "linear",
-    minFilter: "linear",
-    mipmapFilter: "linear"
-  });
+    const uniformBufferSize: number = 16 * 4;
+    const uniformBuffer: GPUBuffer = device!.createBuffer({
+      label: "uniform for quad",
+      size: uniformBufferSize,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+    });
 
-  const uniformBufferSize: number = 16 * 4;
-  const uniformBuffer: GPUBuffer = device!.createBuffer({
-    label: "uniform buffer",
-    size: uniformBufferSize,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
-  });
+    const uniformValues: Float32Array = new Float32Array(uniformBufferSize / 4);
 
-  const uniformValues: Float32Array = new Float32Array(uniformBufferSize / 4);
+    const kMatrixOffset: number = 0;
+    const matrix: Float32Array = uniformValues.subarray(kMatrixOffset, kMatrixOffset + 16);
 
-  const kMatrixOffset: number = 0;
-  const matrixValue: Float32Array = uniformValues.subarray(kMatrixOffset, kMatrixOffset + 16);
-
-  const bindGroup = device!.createBindGroup({
-    label: "bind group for object",
-    layout: pipeline.getBindGroupLayout(0),
-    entries: [
-      { binding: 0, resource: { buffer: uniformBuffer }},
-      { binding: 1, resource: sampler },
-      { binding: 2, resource: texture.createView() }
-    ]
-  });
-
-  let depthTexture: GPUTexture;
+    objectInfos.push({
+      sampler,
+      matrix,
+      uniformValues,
+      uniformBuffer
+    });
+  }
 
   const renderPassDescriptor: GPURenderPassDescriptor = {
     label: "our basic canvas renderPass",
@@ -235,77 +214,66 @@ async function main(): Promise<void> {
         loadOp: "clear",
         storeOp: "store"
       }
-    ],
-    depthStencilAttachment: {
-      view: context!.getCurrentTexture().createView(),
-      depthClearValue: 1.0,
-      depthLoadOp: "clear",
-      depthStoreOp: "store"
-    }
+    ]
   };
-
-  interface CubeSettings {
-    rotation: number[]
-  }
-
-  const degToRad = (d: number) => d * Math.PI / 180;
-
-  const settings: CubeSettings = {
-    rotation: [degToRad(25), degToRad(25), degToRad(0)]
-  }
 
   function render() {
     const canvasTexture: GPUTexture = context!.getCurrentTexture();
     (renderPassDescriptor.colorAttachments as any)[0].view = canvasTexture.createView();
 
-    if (!depthTexture ||
-         depthTexture.width !== canvasTexture.width ||
-         depthTexture.height !== canvasTexture.height) {
-      if (depthTexture) {
-        depthTexture.destroy();
-      }
-      depthTexture = device!.createTexture({
-        size: [canvasTexture.width, canvasTexture.height],
-        format: "depth24plus",
-        usage: GPUTextureUsage.RENDER_ATTACHMENT
-      });
-    }
-    renderPassDescriptor.depthStencilAttachment!.view = depthTexture.createView();  
-
+    const fov: number = 60 * Math.PI / 180;
     const aspect: number = canvas!.clientWidth / canvas!.clientHeight;
-    mat4.perspective(
-      60 * Math.PI / 180,
-      aspect,
-      0.1,
-      10,
-      matrixValue
-    );
-    const view = mat4.lookAt(
-      [0, 1, 5],
-      [0, 0, 0],
-      [0, 1, 0]
-    );
-    mat4.multiply(matrixValue, view, matrixValue);
-    mat4.rotateX(matrixValue, settings.rotation[0], matrixValue);
-    mat4.rotateY(matrixValue, settings.rotation[1], matrixValue);
-    mat4.rotateZ(matrixValue, settings.rotation[2], matrixValue);
+    const zNear: number = 1;
+    const zFar: number = 2000;
+    const projectionMatrix: Mat4 = mat4.perspective(fov, aspect, zNear, zFar);
 
-    device!.queue.writeBuffer(uniformBuffer, 0, uniformValues);
+    const cameraPosition: number[] = [0, 0, 2];
+    const up: number[] = [0, 1, 0];
+    const target: number[] = [0, 0, 0];
+    const viewMatrix: Mat4 = mat4.lookAt(cameraPosition, target, up);
+    const viewProjectionMatrix: Mat4 = mat4.multiply(projectionMatrix, viewMatrix);
 
     const encoder: GPUCommandEncoder = device!.createCommandEncoder({ label: "our encoder" });
     const pass: GPURenderPassEncoder = encoder.beginRenderPass(renderPassDescriptor);
 
     pass.setPipeline(pipeline);
-    pass.setVertexBuffer(0, vertexBuffer);
-    pass.setIndexBuffer(indexBuffer, "uint16");
-    
-    pass.setBindGroup(0, bindGroup);
-    pass.drawIndexed(numVertices);
+
+    const texture: GPUExternalTexture = device!.importExternalTexture({source: video});
+
+    objectInfos.forEach(({sampler, matrix, uniformBuffer, uniformValues}, i) => {
+      const bindGroup: GPUBindGroup = device!.createBindGroup({
+        layout: pipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: sampler },
+          { binding: 1, resource: texture },
+          { binding: 2, resource: { buffer: uniformBuffer }}
+        ]
+      });
+
+      const xSpacing: number = 1.2;
+      const ySpacing: number = 0.5;
+      const zDepth: number = 1;
+
+      const x: number = i % 2 - 0.5;
+      const y: number = i < 2 ? 1 : -1;
+
+      mat4.translate(viewProjectionMatrix, [x * xSpacing, y * ySpacing, -zDepth * 0.5], matrix);
+      mat4.rotateX(matrix, 0.25 * Math.PI * Math.sign(y), matrix);
+      mat4.scale(matrix, [1, -1, 1], matrix);
+      mat4.translate(matrix, [-0.5, -0.5, 0], matrix);
+
+      device!.queue.writeBuffer(uniformBuffer, 0, uniformValues);
+      
+      pass.setBindGroup(0, bindGroup);
+      pass.draw(6);
+    });
 
     pass.end();
 
     const commandBuffer: GPUCommandBuffer = encoder.finish();
     device!.queue.submit([commandBuffer]);
+
+    requestAnimationFrame(render);
   }
 
   const observer: ResizeObserver = new ResizeObserver(entries => {
