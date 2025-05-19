@@ -44,39 +44,47 @@ export namespace MipMapping {
         });
 
         for (let baseMipLevel = 1; baseMipLevel < texture.mipLevelCount; ++baseMipLevel) {
-            const bindGroup: GPUBindGroup = device.createBindGroup({
-                layout: pipeline!.getBindGroupLayout(0),
-                entries: [
-                    { binding: 0, resource: sampler },
-                    { 
-                        binding: 1,
-                        resource: texture.createView({
-                            baseMipLevel: baseMipLevel - 1,
-                            mipLevelCount: 1
-                        })
-                    }
-                ]
-            });
+            for (let layer = 0; layer < texture.depthOrArrayLayers; ++layer) {
+                const bindGroup: GPUBindGroup = device.createBindGroup({
+                    layout: pipeline!.getBindGroupLayout(0),
+                    entries: [
+                        { binding: 0, resource: sampler },
+                        { 
+                            binding: 1,
+                            resource: texture.createView({
+                                dimension: "2d",
+                                baseMipLevel: baseMipLevel - 1,
+                                mipLevelCount: 1,
+                                baseArrayLayer: layer,
+                                arrayLayerCount: 1
+                            })
+                        }
+                    ]
+                });
 
-            const renderPassDescriptor: GPURenderPassDescriptor = {
-                label: "our basic canvas renderPass",
-                colorAttachments: [
-                    {
-                        view: texture.createView({
-                            baseMipLevel,
-                            mipLevelCount: 1
-                        }),
-                        loadOp: "clear",
-                        storeOp: "store"
-                    }
-                ]
+                const renderPassDescriptor: GPURenderPassDescriptor = {
+                    label: "our basic canvas renderPass",
+                    colorAttachments: [
+                        {
+                            view: texture.createView({
+                                dimension: "2d",
+                                baseMipLevel,
+                                mipLevelCount: 1,
+                                baseArrayLayer: layer,
+                                arrayLayerCount: 1
+                            }),
+                            loadOp: "clear",
+                            storeOp: "store"
+                        }
+                    ]
+                }
+
+                const pass: GPURenderPassEncoder = encoder.beginRenderPass(renderPassDescriptor);
+                pass.setPipeline(pipeline!);
+                pass.setBindGroup(0, bindGroup);
+                pass.draw(6);
+                pass.end();
             }
-
-            const pass: GPURenderPassEncoder = encoder.beginRenderPass(renderPassDescriptor);
-            pass.setPipeline(pipeline!);
-            pass.setBindGroup(0, bindGroup);
-            pass.draw(6);
-            pass.end();
         }
         const commandBuffer: GPUCommandBuffer = encoder.finish();
         device.queue.submit([commandBuffer]);
