@@ -1,6 +1,6 @@
 struct VSOut {
     @builtin(position) position: vec4f,
-    @location(0) baryCoord: vec3f
+    @location(0) @interpolate(perspective, centroid) baryCoord: vec3f
 }
 
 @vertex fn vs(
