@@ -9,45 +9,121 @@ interface ModelData {
 
 // Generate the data for a unit cube
 function createCubeData(): ModelData {
-  const vertexData = new Float32Array([
+  const positions = new Float32Array([
     // Front quad             
-      0.5,  0.5,  0.5,  
-     -0.5,  0.5,  0.5,
-     -0.5, -0.5,  0.5,
-      0.5, -0.5,  0.5,
+      0.5,  0.5,  0.5,      
+     -0.5,  0.5,  0.5,      
+     -0.5, -0.5,  0.5,      
+      0.5, -0.5,  0.5,     
 
     // Back quad 
-      0.5,  0.5, -0.5,
-     -0.5,  0.5, -0.5,
-     -0.5, -0.5, -0.5,
-      0.5, -0.5, -0.5,
+     -0.5,  0.5, -0.5,    
+      0.5,  0.5, -0.5,    
+      0.5, -0.5, -0.5,   
+     -0.5, -0.5, -0.5,   
+
+    // Top quad
+      0.5,  0.5, -0.5,      
+     -0.5,  0.5, -0.5,      
+     -0.5,  0.5,  0.5,      
+      0.5,  0.5,  0.5,       
+
+    // Bottom quad
+     -0.5, -0.5, -0.5,     
+      0.5, -0.5, -0.5,      
+      0.5, -0.5,  0.5,     
+     -0.5, -0.5,  0.5,     
+
+    // Left quad
+     -0.5,  0.5,  0.5,     
+     -0.5,  0.5, -0.5,     
+     -0.5, -0.5, -0.5,     
+     -0.5, -0.5,  0.5,      
+
+     // Right quad
+      0.5,  0.5, -0.5,   
+      0.5,  0.5,  0.5,    
+      0.5, -0.5,  0.5,    
+      0.5, -0.5, -0.5,   
   ]); 
+
+  const colors = new Uint8Array([
+    // Front quad
+    255,   0,   0, 255,
+    255,   0,   0, 255,
+    255,   0,   0, 255,
+    255,   0,   0, 255,
+
+    // Back quad
+    255, 255,   0, 255,
+    255, 255,   0, 255,
+    255, 255,   0, 255,
+    255, 255,   0, 255,
+
+    // Top quad
+      0, 255,   0, 255,
+      0, 255,   0, 255,
+      0, 255,   0, 255,
+      0, 255,   0, 255,
+
+    // Bottom quad
+      0, 255, 255, 255,
+      0, 255, 255, 255,
+      0, 255, 255, 255,
+      0, 255, 255, 255,
+
+    // Left quad
+      0,   0, 255, 255,
+      0,   0, 255, 255,
+      0,   0, 255, 255,
+      0,   0, 255, 255,
+
+    // Right quad
+    255,   0, 255, 255,
+    255,   0, 255, 255,
+    255,   0, 255, 255,
+    255,   0, 255, 255
+  ]);
     
   const indexData = new Uint16Array([
     // Front quad
-    0, 1, 2, // top tri
-    3, 0, 2, // bottom tri
+      0,  1,  2, // top tri
+      2,  3,  0, // bottom tri
 
     // Back quad
-    5, 4, 7, // top tri
-    6, 5, 7, // bottom tri
+      4,  5,  6, // top tri
+      6,  7,  4, // bottom tri
 
     // Top quad
-    4, 5, 1, // top tri
-    0, 4, 1, // bottom tri
+      8,  9, 10, // top tri
+     10, 11,  8, // bottom tri
 
     // Bottom quad
-    3, 2, 6, // top tri
-    7, 3, 6, // bottom tri
+     12, 13, 14, // top tri
+     14, 15, 12, // bottom tri
 
     // Left quad
-    1, 5, 6, // top tri
-    2, 1, 6, // bottom tri
+     16, 17, 18, // top tri
+     18, 19, 16, // bottom tri
 
     // Right quad
-    4, 0, 3, // top
-    7, 4, 3 // bottom tri
+     20, 21, 22, // top
+     22, 23, 20  // bottom tri
   ]);
+
+  const numVertices = positions.length / 3;
+  const vertexData = new Float32Array(numVertices * 4);
+  const colorData = new Uint8Array(vertexData.buffer);
+
+  for (let i = 0; i < numVertices; i++) {
+    const positionNdx = i * 3;
+    const position = positions.slice(positionNdx, positionNdx + 3);
+    vertexData.set(position, i * 4);
+    
+    const colorNdx = i * 4;
+    const color = colors.slice(colorNdx, colorNdx + 4);
+    colorData.set(color, i * 16 + 12);
+  }
 
   return {
     vertexData,
@@ -85,9 +161,10 @@ async function main(): Promise<void> {
       module,
       buffers: [
         {
-          arrayStride: (3) * 4,
+          arrayStride: (4) * 4,
           attributes: [
             {shaderLocation: 0, offset: 0, format: "float32x3"},
+            {shaderLocation: 1, offset: 12, format: "unorm8x4"}
           ]
         }
       ]
@@ -208,11 +285,11 @@ async function main(): Promise<void> {
       60 * Math.PI / 180,
       aspect,
       0.1,
-      10,
+      2000,
       matrixValue
     );
     const view = mat4.lookAt(
-      [0, 3, 4],
+      [-2, 3, 4],
       [0, 0, 0],
       [0, 1, 0]
     );
@@ -226,7 +303,7 @@ async function main(): Promise<void> {
     pass.setPipeline(pipeline);
     pass.setVertexBuffer(0, vertexBuffer);
     pass.setIndexBuffer(indexBuffer, "uint16");
-    pass.setBindGroup(0, bindGroup)
+    pass.setBindGroup(0, bindGroup);
     pass.drawIndexed(cubeData.numVertices);
     pass.end();
 

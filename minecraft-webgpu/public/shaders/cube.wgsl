@@ -3,15 +3,24 @@ struct Uniforms {
 }
 
 struct Vertex {
-    @location(0) position: vec4f
+    @location(0) position: vec4f,
+    @location(1) color: vec4f
+}
+
+struct VSOut {
+    @builtin(position) position: vec4f,
+    @location(0) color: vec4f
 }
 
 @group(0) @binding(0) var<uniform> uni: Uniforms;
 
-@vertex fn vs(vert: Vertex) -> @builtin(position) vec4f {
-    return uni.matrix * vert.position;
+@vertex fn vs(vert: Vertex) -> VSOut {
+    var vsOut: VSOut;
+    vsOut.position = uni.matrix * vert.position;
+    vsOut.color = vert.color;
+    return vsOut;
 }
 
-@fragment fn fs(@builtin(position) position: vec4f) -> @location(0) vec4f {
-    return vec4f(1, 0, 0, 1);
+@fragment fn fs(fsIn: VSOut) -> @location(0) vec4f {
+    return fsIn.color;
 }
