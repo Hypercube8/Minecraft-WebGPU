@@ -1,4 +1,4 @@
-import texturedCubeShader from "/shaders/cube.wgsl?raw";
+import texturedCubeShader from "/shaders/textured_cube.wgsl?raw";
 import { mat4 } from "wgpu-matrix";
  
 interface ModelData {
@@ -9,81 +9,45 @@ interface ModelData {
 
 // Generate the data for a unit cube
 function createCubeData(): ModelData {
-  const positions = new Float32Array([
+  const vertexData = new Float32Array([
+    //   Positions     |    UVs
+
     // Front quad             
-      0.5,  0.5,  0.5,      
-     -0.5,  0.5,  0.5,      
-     -0.5, -0.5,  0.5,      
-      0.5, -0.5,  0.5,     
+      0.5,  0.5,  0.5,   1.0, 1.0,        
+     -0.5,  0.5,  0.5,   0.0, 1.0,
+     -0.5, -0.5,  0.5,   0.0, 0.0,   
+      0.5, -0.5,  0.5,   1.0, 0.0,  
 
     // Back quad 
-     -0.5,  0.5, -0.5,    
-      0.5,  0.5, -0.5,    
-      0.5, -0.5, -0.5,   
-     -0.5, -0.5, -0.5,   
+     -0.5,  0.5, -0.5,   1.0, 1.0,
+      0.5,  0.5, -0.5,   0.0, 1.0,
+      0.5, -0.5, -0.5,   0.0, 0.0,
+     -0.5, -0.5, -0.5,   1.0, 0.0,
 
     // Top quad
-      0.5,  0.5, -0.5,      
-     -0.5,  0.5, -0.5,      
-     -0.5,  0.5,  0.5,      
-      0.5,  0.5,  0.5,       
+      0.5,  0.5, -0.5,   1.0, 1.0,   
+     -0.5,  0.5, -0.5,   0.0, 1.0,   
+     -0.5,  0.5,  0.5,   0.0, 0.0,
+      0.5,  0.5,  0.5,   1.0, 0.0,
 
     // Bottom quad
-     -0.5, -0.5, -0.5,     
-      0.5, -0.5, -0.5,      
-      0.5, -0.5,  0.5,     
-     -0.5, -0.5,  0.5,     
+     -0.5, -0.5, -0.5,   1.0, 1.0,
+      0.5, -0.5, -0.5,   0.0, 1.0,   
+      0.5, -0.5,  0.5,   0.0, 0.0, 
+     -0.5, -0.5,  0.5,   1.0, 0.0,
 
     // Left quad
-     -0.5,  0.5,  0.5,     
-     -0.5,  0.5, -0.5,     
-     -0.5, -0.5, -0.5,     
-     -0.5, -0.5,  0.5,      
+     -0.5,  0.5,  0.5,   1.0, 1.0,  
+     -0.5,  0.5, -0.5,   0.0, 1.0,  
+     -0.5, -0.5, -0.5,   0.0, 0.0,
+     -0.5, -0.5,  0.5,   1.0, 0.0,   
 
      // Right quad
-      0.5,  0.5, -0.5,   
-      0.5,  0.5,  0.5,    
-      0.5, -0.5,  0.5,    
-      0.5, -0.5, -0.5,   
+      0.5,  0.5, -0.5,   1.0, 1.0,
+      0.5,  0.5,  0.5,   0.0, 1.0, 
+      0.5, -0.5,  0.5,   0.0, 0.0, 
+      0.5, -0.5, -0.5,   1.0, 0.0
   ]); 
-
-  const colors = new Uint8Array([
-    // Front quad
-    255,   0,   0, 255,
-    255,   0,   0, 255,
-    255,   0,   0, 255,
-    255,   0,   0, 255,
-
-    // Back quad
-    255, 255,   0, 255,
-    255, 255,   0, 255,
-    255, 255,   0, 255,
-    255, 255,   0, 255,
-
-    // Top quad
-      0, 255,   0, 255,
-      0, 255,   0, 255,
-      0, 255,   0, 255,
-      0, 255,   0, 255,
-
-    // Bottom quad
-      0, 255, 255, 255,
-      0, 255, 255, 255,
-      0, 255, 255, 255,
-      0, 255, 255, 255,
-
-    // Left quad
-      0,   0, 255, 255,
-      0,   0, 255, 255,
-      0,   0, 255, 255,
-      0,   0, 255, 255,
-
-    // Right quad
-    255,   0, 255, 255,
-    255,   0, 255, 255,
-    255,   0, 255, 255,
-    255,   0, 255, 255
-  ]);
     
   const indexData = new Uint16Array([
     // Front quad
@@ -110,20 +74,6 @@ function createCubeData(): ModelData {
      20, 21, 22, // top
      22, 23, 20  // bottom tri
   ]);
-
-  const numVertices = positions.length / 3;
-  const vertexData = new Float32Array(numVertices * 4);
-  const colorData = new Uint8Array(vertexData.buffer);
-
-  for (let i = 0; i < numVertices; i++) {
-    const positionNdx = i * 3;
-    const position = positions.slice(positionNdx, positionNdx + 3);
-    vertexData.set(position, i * 4);
-    
-    const colorNdx = i * 4;
-    const color = colors.slice(colorNdx, colorNdx + 4);
-    colorData.set(color, i * 16 + 12);
-  }
 
   return {
     vertexData,
@@ -161,10 +111,10 @@ async function main(): Promise<void> {
       module,
       buffers: [
         {
-          arrayStride: (4) * 4,
+          arrayStride: (3 + 2) * 4,
           attributes: [
             {shaderLocation: 0, offset: 0, format: "float32x3"},
-            {shaderLocation: 1, offset: 12, format: "unorm8x4"}
+            {shaderLocation: 1, offset: 12, format: "float32x2"}
           ]
         }
       ]
@@ -184,6 +134,31 @@ async function main(): Promise<void> {
     multisample: {
       count: 4
     }
+  });
+
+  const res = await fetch("/assets/images/dirt.png");
+  const blob = await res.blob();
+  const source = await createImageBitmap(blob, { colorSpaceConversion: "none" });
+
+  const texture = device!.createTexture({
+    label: "Cube Texture",
+    size: [source.width, source.height],
+    format: "rgba8unorm",
+    usage: GPUTextureUsage.TEXTURE_BINDING | 
+           GPUTextureUsage.COPY_DST |
+           GPUTextureUsage.RENDER_ATTACHMENT
+  });
+
+  device!.queue.copyExternalImageToTexture(
+    { source, flipY: true },
+    { texture },
+    { width: source.width, height: source.height }
+  );
+
+  const sampler = device!.createSampler({
+    label: "Cube Sampler",
+    minFilter: "nearest",
+    magFilter: "nearest"
   });
 
   const uniformBufferSize = (16) * 4;
@@ -217,7 +192,9 @@ async function main(): Promise<void> {
     label: "Cube Bind Group",
     layout: pipeline.getBindGroupLayout(0),
     entries: [
-      { binding: 0, resource: { buffer: uniformBuffer }}
+      { binding: 0, resource: { buffer: uniformBuffer }},
+      { binding: 1, resource: sampler },
+      { binding: 2, resource: texture.createView() }
     ]
   });
 

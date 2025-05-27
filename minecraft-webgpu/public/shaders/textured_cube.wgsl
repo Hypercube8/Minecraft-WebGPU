@@ -4,23 +4,25 @@ struct Uniforms {
 
 struct Vertex {
     @location(0) position: vec4f,
-    @location(1) color: vec4f
+    @location(1) texcoord: vec2f
 }
 
 struct VSOut {
     @builtin(position) position: vec4f,
-    @location(0) color: vec4f
+    @location(0) texcoord: vec2f
 }
 
 @group(0) @binding(0) var<uniform> uni: Uniforms;
+@group(0) @binding(1) var cubeSampler: sampler;
+@group(0) @binding(2) var cubeTexture: texture_2d<f32>;
 
 @vertex fn vs(vert: Vertex) -> VSOut {
     var vsOut: VSOut;
     vsOut.position = uni.matrix * vert.position;
-    vsOut.color = vert.color;
+    vsOut.texcoord = vert.texcoord;
     return vsOut;
 }
 
 @fragment fn fs(fsIn: VSOut) -> @location(0) vec4f {
-    return fsIn.color;
+    return textureSample(cubeTexture, cubeSampler, fsIn.texcoord);
 }
