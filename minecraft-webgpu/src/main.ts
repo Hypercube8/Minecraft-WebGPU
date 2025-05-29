@@ -1,5 +1,6 @@
 import texturedCubeShader from "/shaders/textured_cube.wgsl?raw";
 import { mat4 } from "wgpu-matrix";
+import { read } from "ktx-parse";
  
 interface ModelData {
   vertexData: Float32Array;
@@ -136,29 +137,44 @@ async function main(): Promise<void> {
     }
   });
 
-  const res = await fetch("/assets/images/dirt.png");
-  const blob = await res.blob();
-  const source = await createImageBitmap(blob, { colorSpaceConversion: "none" });
-
+  const res = await fetch("/assets/textures/dirt.ktx2");
+  const arrayBuffer = await res.arrayBuffer();
+  const ktxTexture = read(new Uint8Array(arrayBuffer));
+ 
   const texture = device!.createTexture({
     label: "Cube Texture",
-    size: [source.width, source.height],
+    size: [ktxTexture.pixelWidth, ktxTexture.pixelHeight],
+    mipLevelCount: ktxTexture.levels.length,
     format: "rgba8unorm",
     usage: GPUTextureUsage.TEXTURE_BINDING | 
            GPUTextureUsage.COPY_DST |
            GPUTextureUsage.RENDER_ATTACHMENT
   });
 
-  device!.queue.copyExternalImageToTexture(
-    { source, flipY: true },
-    { texture },
-    { width: source.width, height: source.height }
-  );
+  alert(ktxTexture.pixelWidth);
+  ktxTexture.levels.forEach((level, mipLevel) => {
+    const width = ktxTexture.pixelWidth / Math.pow(2, mipLevel);
+    const height = ktxTexture.pixelHeight / Math.pow(2, mipLevel);
+    device!.queue.writeTexture(
+      { texture, mipLevel },
+      level.levelData,
+      { bytesPerRow: width * 4 },
+      { width, height }
+    );
+  })
+
+  // device!.queue.writeTexture(
+  //     { texture, },
+  //     ktxTexture.levels[0].levelData,
+  //     { bytesPerRow: ktxTexture.pixelWidth * 4 },
+  //     { width: ktxTexture.pixelWidth, height: ktxTexture.pixelHeight }
+  //   );
 
   const sampler = device!.createSampler({
     label: "Cube Sampler",
     minFilter: "nearest",
-    magFilter: "nearest"
+    magFilter: "nearest",
+    mipmapFilter: "nearest"
   });
 
   const uniformBufferSize = (16) * 4;
@@ -266,7 +282,7 @@ async function main(): Promise<void> {
       matrixValue
     );
     const view = mat4.lookAt(
-      [-2, 3, 4],
+      [2, 0, 1],
       [0, 0, 0],
       [0, 1, 0]
     );
