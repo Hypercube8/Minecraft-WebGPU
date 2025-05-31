@@ -1,5 +1,5 @@
 import texturedCubeShader from "/shaders/textured_cube.wgsl?raw";
-import { mat4 } from "wgpu-matrix";
+import { mat4, Vec2, Vec3, vec3 } from "wgpu-matrix";
 import { read } from "ktx-parse";
  
 interface ModelData {
@@ -151,7 +151,6 @@ async function main(): Promise<void> {
            GPUTextureUsage.RENDER_ATTACHMENT
   });
 
-  alert(ktxTexture.pixelWidth);
   ktxTexture.levels.forEach((level, mipLevel) => {
     const width = ktxTexture.pixelWidth / Math.pow(2, mipLevel);
     const height = ktxTexture.pixelHeight / Math.pow(2, mipLevel);
@@ -174,19 +173,19 @@ async function main(): Promise<void> {
     label: "Cube Sampler",
     minFilter: "nearest",
     magFilter: "nearest",
-    mipmapFilter: "nearest"
+    mipmapFilter: "linear"
   });
 
-  const uniformBufferSize = (16) * 4;
+  const numObjects = 64;
+  const uniformUnitSize = (16) * 4;
+  const uniformBufferSize = uniformUnitSize * numObjects;
+ 
   const uniformBuffer = device!.createBuffer({
     label: "Cube Unifoms",
     size: uniformBufferSize,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
   });
   const uniformValues = new Float32Array(uniformBufferSize / 4);
-
-  const matrixOffset = 0;
-  const matrixValue = uniformValues.subarray(matrixOffset, matrixOffset + 16);
 
   const cubeData = createCubeData();
 
@@ -232,10 +231,90 @@ async function main(): Promise<void> {
     }
   };
 
+  let deltaTime: number;
+
+  const cameraInput: Vec2 = new Float32Array(2);
+
+  window.addEventListener("click", async () => {
+    await canvas!.requestPointerLock({
+      unadjustedMovement: true
+    })
+  }); 
+
+  const clamp = (x: number, min: number, max: number) => Math.min(Math.max(x, min), max);
+  const deg2rad = (deg: number) => deg * Math.PI / 180;
+
+  window.addEventListener("mousemove", (e) => {
+    cameraInput[0] -= e.movementX * deltaTime;
+    cameraInput[1] -= e.movementY * deltaTime;
+
+    cameraInput[0] = cameraInput[0] % deg2rad(360);
+    cameraInput[1] = clamp(cameraInput[1], deg2rad(-90), deg2rad(90));
+  });
+
+  const movement: Vec2 = new Float32Array(2);
+
+  window.addEventListener("keydown", (e) => {
+    switch (e.key) {
+      case "w":
+        movement[1] = -1;
+        e.preventDefault();
+        e.stopPropagation();
+        break;
+      case "s":
+        movement[1] = 1;
+        e.preventDefault();
+        e.stopPropagation();
+        break;
+      case "a":
+        movement[0] = -1;
+        e.preventDefault();
+        e.stopPropagation();
+        break;
+      case "d":
+        movement[0] = 1;
+        e.preventDefault();
+        e.stopPropagation();
+        break;
+    }
+  });
+
+  window.addEventListener("keyup", (e) => {
+    switch (e.key) {
+      case "w":
+        movement[1] = 0;
+        e.preventDefault();
+        e.stopPropagation();
+        break;
+      case "s":
+        movement[1] = 0;
+        e.preventDefault();
+        e.stopPropagation();
+        break;
+      case "a":
+        movement[0] = 0;
+        e.preventDefault();
+        e.stopPropagation();
+        break;
+      case "d":
+        movement[0] = 0;
+        e.preventDefault();
+        e.stopPropagation();
+        break;
+    }
+  });
+
   let depthTexture: GPUTexture | undefined;
   let multisampleTexture: GPUTexture | undefined;
 
-  function render() {
+  let lastTime = 0;
+
+  let position = [10, 0, 0];
+
+  function render(elapsed: number) {
+    deltaTime = (elapsed - lastTime) / 1000;
+    lastTime = elapsed;
+    
     const canvasTexture: GPUTexture = context!.getCurrentTexture();
     (renderPassDescriptor.colorAttachments as any)[0].view = canvasTexture.createView();
 
@@ -274,19 +353,28 @@ async function main(): Promise<void> {
     (renderPassDescriptor as any).colorAttachments[0].resolveTarget = canvasTexture.createView();
 
     const aspect = canvas!.clientWidth / canvas!.clientHeight;
-    mat4.perspective(
+
+    const projection = mat4.perspective(
       60 * Math.PI / 180,
       aspect,
       0.1,
-      2000,
-      matrixValue
+      2000
     );
-    const view = mat4.lookAt(
-      [2, 0, 1],
-      [0, 0, 0],
-      [0, 1, 0]
-    );
-    mat4.multiply(matrixValue, view, matrixValue);
+
+    const rotation = mat4.rotateX(mat4.rotationY(cameraInput[0]), cameraInput[1]);
+    vec3.addScaled(position, rotation.slice(0, 4), movement[0] * deltaTime * 3, position);
+    vec3.addScaled(position, rotation.slice(8, 12), movement[1] * deltaTime * 3, position);
+    const view = mat4.translation(position);
+    mat4.multiply(view, rotation, view);
+    mat4.invert(view, view);
+
+    const viewProjection = mat4.multiply(projection, view);
+
+    for (let i = 0; i < numObjects; i++) {
+      const model = mat4.translation([i % 32, (i >> 5) % 32, (i >> 10) % 32]);
+      const modelViewProjection = mat4.multiply(viewProjection, model);
+      uniformValues.set(modelViewProjection, (uniformUnitSize / 4) * i);
+    }
 
     device!.queue.writeBuffer(uniformBuffer, 0, uniformValues);
 
@@ -297,11 +385,13 @@ async function main(): Promise<void> {
     pass.setVertexBuffer(0, vertexBuffer);
     pass.setIndexBuffer(indexBuffer, "uint16");
     pass.setBindGroup(0, bindGroup);
-    pass.drawIndexed(cubeData.numVertices);
+    pass.drawIndexed(cubeData.numVertices, 64);
     pass.end();
 
     const commandBuffer: GPUCommandBuffer = encoder.finish();
     device!.queue.submit([commandBuffer]);
+
+    requestAnimationFrame(render);
   }
 
   const observer: ResizeObserver = new ResizeObserver(entries => {
@@ -312,7 +402,7 @@ async function main(): Promise<void> {
       canvas.width = Math.max(1, Math.min(width, device.limits.maxTextureDimension2D));
       canvas.height = Math.max(1, Math.min(height, device.limits.maxTextureDimension2D));
     }
-    render();
+    render(0);
   });
   observer.observe(canvas as Element);
 }
