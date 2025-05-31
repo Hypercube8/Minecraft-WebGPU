@@ -1,4 +1,4 @@
-struct Uniforms {
+struct Transform {
     matrix: mat4x4f
 }
 
@@ -12,16 +12,16 @@ struct VSOut {
     @location(0) texcoord: vec2f
 }
 
-@group(0) @binding(0) var<uniform> uniforms: array<Uniforms, 64>;
+@group(0) @binding(0) var<storage, read> transforms: array<Transform>;
 @group(0) @binding(1) var cubeSampler: sampler;
 @group(0) @binding(2) var cubeTexture: texture_2d<f32>;
 
 @vertex fn vs(
     @builtin(instance_index) instanceIndex: u32,
     vert: Vertex) -> VSOut {
-    let uni = uniforms[instanceIndex];
+    let transform = transforms[instanceIndex];
     var vsOut: VSOut;
-    vsOut.position = uni.matrix * vert.position;
+    vsOut.position = transform.matrix * vert.position;
     vsOut.texcoord = vert.texcoord;
     return vsOut;
 }

@@ -162,13 +162,6 @@ async function main(): Promise<void> {
     );
   })
 
-  // device!.queue.writeTexture(
-  //     { texture, },
-  //     ktxTexture.levels[0].levelData,
-  //     { bytesPerRow: ktxTexture.pixelWidth * 4 },
-  //     { width: ktxTexture.pixelWidth, height: ktxTexture.pixelHeight }
-  //   );
-
   const sampler = device!.createSampler({
     label: "Cube Sampler",
     minFilter: "nearest",
@@ -176,16 +169,21 @@ async function main(): Promise<void> {
     mipmapFilter: "linear"
   });
 
-  const numObjects = 64;
-  const uniformUnitSize = (16) * 4;
-  const uniformBufferSize = uniformUnitSize * numObjects;
+  const numObjects = 32768;
+  const instanceUnitSize = (16) * 4;
+  const instanceBufferSize = instanceUnitSize * numObjects;
  
-  const uniformBuffer = device!.createBuffer({
-    label: "Cube Unifoms",
-    size: uniformBufferSize,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+  // const uniformBuffer = device!.createBuffer({
+  //   label: "Cube Unifoms",
+  //   size: uniformBufferSize,
+  //   usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+  // });
+  const instanceBuffer = device!.createBuffer({
+    label: "Cube Instance Buffer",
+    size: instanceBufferSize,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
   });
-  const uniformValues = new Float32Array(uniformBufferSize / 4);
+  const instanceValues = new Float32Array(instanceBufferSize / 4);
 
   const cubeData = createCubeData();
 
@@ -207,7 +205,7 @@ async function main(): Promise<void> {
     label: "Cube Bind Group",
     layout: pipeline.getBindGroupLayout(0),
     entries: [
-      { binding: 0, resource: { buffer: uniformBuffer }},
+      { binding: 0, resource: { buffer: instanceBuffer }},
       { binding: 1, resource: sampler },
       { binding: 2, resource: texture.createView() }
     ]
@@ -373,10 +371,11 @@ async function main(): Promise<void> {
     for (let i = 0; i < numObjects; i++) {
       const model = mat4.translation([i % 32, (i >> 5) % 32, (i >> 10) % 32]);
       const modelViewProjection = mat4.multiply(viewProjection, model);
-      uniformValues.set(modelViewProjection, (uniformUnitSize / 4) * i);
+      instanceValues.set(modelViewProjection, (instanceUnitSize / 4) * i);
     }
+    console.log(instanceValues.length);
 
-    device!.queue.writeBuffer(uniformBuffer, 0, uniformValues);
+    device!.queue.writeBuffer(instanceBuffer, 0, instanceValues);
 
     const encoder: GPUCommandEncoder = device!.createCommandEncoder({ label: "our encoder" });
     const pass: GPURenderPassEncoder = encoder.beginRenderPass(renderPassDescriptor);
@@ -385,7 +384,7 @@ async function main(): Promise<void> {
     pass.setVertexBuffer(0, vertexBuffer);
     pass.setIndexBuffer(indexBuffer, "uint16");
     pass.setBindGroup(0, bindGroup);
-    pass.drawIndexed(cubeData.numVertices, 64);
+    pass.drawIndexed(cubeData.numVertices, numObjects);
     pass.end();
 
     const commandBuffer: GPUCommandBuffer = encoder.finish();
