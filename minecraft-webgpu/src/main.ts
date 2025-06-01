@@ -1,11 +1,56 @@
 import texturedCubeShader from "/shaders/textured_cube.wgsl?raw";
-import { mat4, Vec2, Vec3, vec3 } from "wgpu-matrix";
+import { mat4, Mat4, Vec2, Vec3, vec3 } from "wgpu-matrix";
 import { read } from "ktx-parse";
  
 interface ModelData {
   vertexData: Float32Array;
   indexData: Uint16Array;
   numVertices: number;
+}
+
+const deg2rad = (deg: number) => deg * Math.PI / 180;
+
+function generateChunkMesh(data: Uint8Array) {
+  const indexChunk = (x: number, y: number, z: number) => {
+    if (x < 0 || x >= 32 || y < 0 || y >= 32 || z < 0 || z >= 32) return 0;
+    return data[z * 1024 + y * 32 + x];
+  }
+
+  const backMatrix = mat4.rotationY(deg2rad(180));
+  const upMatrix = mat4.rotationX(deg2rad(-90));
+  const downMatrix = mat4.rotationX(deg2rad(90));
+  const leftMatrix = mat4.rotationY(deg2rad(90));
+  const rightMatrix = mat4.rotationY(deg2rad(-90));
+
+  const meshData: Mat4[] = [];
+
+  for (let x = 0; x < 32; x++) {
+    for (let y = 0; y < 32; y++) {
+      for (let z = 0; z < 32; z++) {
+        if (!indexChunk(x, y, z)) {
+          continue;
+        }
+
+        const positionMatrix = mat4.translation([x, y, z]);
+
+        const frontNeighbor = indexChunk(x, y, z+1);
+        const backNeighbor = indexChunk(x, y, z-1);
+        const upNeighbor = indexChunk(x, y+1, z);
+        const downNeighbor = indexChunk(x, y-1, z);
+        const leftNeighbor = indexChunk(x+1, y, z);
+        const rightNeighbor = indexChunk(x-1, y, z);
+
+        if (!frontNeighbor) { meshData.push(positionMatrix); }
+        if (!backNeighbor) { meshData.push(mat4.multiply(positionMatrix, backMatrix)); }
+        if (!upNeighbor) { meshData.push(mat4.multiply(positionMatrix, upMatrix)); }
+        if (!downNeighbor) { meshData.push(mat4.multiply(positionMatrix, downMatrix)); }
+        if (!leftNeighbor) { meshData.push(mat4.multiply(positionMatrix, leftMatrix)); }
+        if (!rightNeighbor) { meshData.push(mat4.multiply(positionMatrix, rightMatrix)); }
+      }
+    }
+  }
+
+  return meshData;
 }
 
 // Generate the data for a unit cube
@@ -19,35 +64,35 @@ function createCubeData(): ModelData {
      -0.5, -0.5,  0.5,   0.0, 0.0,   
       0.5, -0.5,  0.5,   1.0, 0.0,  
 
-    // Back quad 
-     -0.5,  0.5, -0.5,   1.0, 1.0,
-      0.5,  0.5, -0.5,   0.0, 1.0,
-      0.5, -0.5, -0.5,   0.0, 0.0,
-     -0.5, -0.5, -0.5,   1.0, 0.0,
+    // // Back quad 
+    //  -0.5,  0.5, -0.5,   1.0, 1.0,
+    //   0.5,  0.5, -0.5,   0.0, 1.0,
+    //   0.5, -0.5, -0.5,   0.0, 0.0,
+    //  -0.5, -0.5, -0.5,   1.0, 0.0,
 
-    // Top quad
-      0.5,  0.5, -0.5,   1.0, 1.0,   
-     -0.5,  0.5, -0.5,   0.0, 1.0,   
-     -0.5,  0.5,  0.5,   0.0, 0.0,
-      0.5,  0.5,  0.5,   1.0, 0.0,
+    // // Top quad
+    //   0.5,  0.5, -0.5,   1.0, 1.0,   
+    //  -0.5,  0.5, -0.5,   0.0, 1.0,   
+    //  -0.5,  0.5,  0.5,   0.0, 0.0,
+    //   0.5,  0.5,  0.5,   1.0, 0.0,
 
-    // Bottom quad
-     -0.5, -0.5, -0.5,   1.0, 1.0,
-      0.5, -0.5, -0.5,   0.0, 1.0,   
-      0.5, -0.5,  0.5,   0.0, 0.0, 
-     -0.5, -0.5,  0.5,   1.0, 0.0,
+    // // Bottom quad
+    //  -0.5, -0.5, -0.5,   1.0, 1.0,
+    //   0.5, -0.5, -0.5,   0.0, 1.0,   
+    //   0.5, -0.5,  0.5,   0.0, 0.0, 
+    //  -0.5, -0.5,  0.5,   1.0, 0.0,
 
-    // Left quad
-     -0.5,  0.5,  0.5,   1.0, 1.0,  
-     -0.5,  0.5, -0.5,   0.0, 1.0,  
-     -0.5, -0.5, -0.5,   0.0, 0.0,
-     -0.5, -0.5,  0.5,   1.0, 0.0,   
+    // // Left quad
+    //  -0.5,  0.5,  0.5,   1.0, 1.0,  
+    //  -0.5,  0.5, -0.5,   0.0, 1.0,  
+    //  -0.5, -0.5, -0.5,   0.0, 0.0,
+    //  -0.5, -0.5,  0.5,   1.0, 0.0,   
 
-     // Right quad
-      0.5,  0.5, -0.5,   1.0, 1.0,
-      0.5,  0.5,  0.5,   0.0, 1.0, 
-      0.5, -0.5,  0.5,   0.0, 0.0, 
-      0.5, -0.5, -0.5,   1.0, 0.0
+    //  // Right quad
+    //   0.5,  0.5, -0.5,   1.0, 1.0,
+    //   0.5,  0.5,  0.5,   0.0, 1.0, 
+    //   0.5, -0.5,  0.5,   0.0, 0.0, 
+    //   0.5, -0.5, -0.5,   1.0, 0.0
   ]); 
     
   const indexData = new Uint16Array([
@@ -55,25 +100,25 @@ function createCubeData(): ModelData {
       0,  1,  2, // top tri
       2,  3,  0, // bottom tri
 
-    // Back quad
-      4,  5,  6, // top tri
-      6,  7,  4, // bottom tri
+    // // Back quad
+    //   4,  5,  6, // top tri
+    //   6,  7,  4, // bottom tri
 
-    // Top quad
-      8,  9, 10, // top tri
-     10, 11,  8, // bottom tri
+    // // Top quad
+    //   8,  9, 10, // top tri
+    //  10, 11,  8, // bottom tri
 
-    // Bottom quad
-     12, 13, 14, // top tri
-     14, 15, 12, // bottom tri
+    // // Bottom quad
+    //  12, 13, 14, // top tri
+    //  14, 15, 12, // bottom tri
 
-    // Left quad
-     16, 17, 18, // top tri
-     18, 19, 16, // bottom tri
+    // // Left quad
+    //  16, 17, 18, // top tri
+    //  18, 19, 16, // bottom tri
 
-    // Right quad
-     20, 21, 22, // top
-     22, 23, 20  // bottom tri
+    // // Right quad
+    //  20, 21, 22, // top
+    //  22, 23, 20  // bottom tri
   ]);
 
   return {
@@ -169,15 +214,18 @@ async function main(): Promise<void> {
     mipmapFilter: "linear"
   });
 
-  const numObjects = 32768;
+  const uniformBufferSize = 16 * 4;
+  const uniformBuffer = device!.createBuffer({
+    label: "Uniform Buffer for Cube",
+    size: uniformBufferSize,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+  });
+  const uniformValues = new Float32Array(uniformBufferSize / 4);
+
+  const numObjects = 32768 * 6;
   const instanceUnitSize = (16) * 4;
   const instanceBufferSize = instanceUnitSize * numObjects;
  
-  // const uniformBuffer = device!.createBuffer({
-  //   label: "Cube Unifoms",
-  //   size: uniformBufferSize,
-  //   usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
-  // });
   const instanceBuffer = device!.createBuffer({
     label: "Cube Instance Buffer",
     size: instanceBufferSize,
@@ -207,7 +255,8 @@ async function main(): Promise<void> {
     entries: [
       { binding: 0, resource: { buffer: instanceBuffer }},
       { binding: 1, resource: sampler },
-      { binding: 2, resource: texture.createView() }
+      { binding: 2, resource: texture.createView() },
+      { binding: 3, resource: { buffer: uniformBuffer }}
     ]
   });
 
@@ -240,7 +289,6 @@ async function main(): Promise<void> {
   }); 
 
   const clamp = (x: number, min: number, max: number) => Math.min(Math.max(x, min), max);
-  const deg2rad = (deg: number) => deg * Math.PI / 180;
 
   window.addEventListener("mousemove", (e) => {
     cameraInput[0] -= e.movementX * deltaTime;
@@ -302,12 +350,24 @@ async function main(): Promise<void> {
     }
   });
 
+  const voxelData = new Uint8Array(32768);
+  for (let i = 0; i < 32768; i++) {
+    voxelData[i] = Math.round(Math.random());
+  }
+
+  const voxelMesh = generateChunkMesh(voxelData);
+  for (let i = 0; i < voxelMesh.length; i++) {
+      const model = voxelMesh[i];
+      instanceValues.set(model, (instanceUnitSize / 4) * i);
+  }
+  device!.queue.writeBuffer(instanceBuffer, 0, instanceValues);
+
   let depthTexture: GPUTexture | undefined;
   let multisampleTexture: GPUTexture | undefined;
 
   let lastTime = 0;
 
-  let position = [10, 0, 0];
+  let position = [16, 0, 16];
 
   function render(elapsed: number) {
     deltaTime = (elapsed - lastTime) / 1000;
@@ -366,16 +426,8 @@ async function main(): Promise<void> {
     mat4.multiply(view, rotation, view);
     mat4.invert(view, view);
 
-    const viewProjection = mat4.multiply(projection, view);
-
-    for (let i = 0; i < numObjects; i++) {
-      const model = mat4.translation([i % 32, (i >> 5) % 32, (i >> 10) % 32]);
-      const modelViewProjection = mat4.multiply(viewProjection, model);
-      instanceValues.set(modelViewProjection, (instanceUnitSize / 4) * i);
-    }
-    console.log(instanceValues.length);
-
-    device!.queue.writeBuffer(instanceBuffer, 0, instanceValues);
+    mat4.multiply(projection, view, uniformValues);
+    device!.queue.writeBuffer(uniformBuffer, 0, uniformValues);
 
     const encoder: GPUCommandEncoder = device!.createCommandEncoder({ label: "our encoder" });
     const pass: GPURenderPassEncoder = encoder.beginRenderPass(renderPassDescriptor);
@@ -384,7 +436,7 @@ async function main(): Promise<void> {
     pass.setVertexBuffer(0, vertexBuffer);
     pass.setIndexBuffer(indexBuffer, "uint16");
     pass.setBindGroup(0, bindGroup);
-    pass.drawIndexed(cubeData.numVertices, numObjects);
+    pass.drawIndexed(cubeData.numVertices, voxelMesh.length);
     pass.end();
 
     const commandBuffer: GPUCommandBuffer = encoder.finish();

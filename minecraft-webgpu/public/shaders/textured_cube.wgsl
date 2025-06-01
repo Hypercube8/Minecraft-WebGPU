@@ -2,6 +2,10 @@ struct Transform {
     matrix: mat4x4f
 }
 
+struct Uniform {
+    viewProjection: mat4x4f
+}
+
 struct Vertex {
     @location(0) position: vec4f,
     @location(1) texcoord: vec2f
@@ -15,13 +19,15 @@ struct VSOut {
 @group(0) @binding(0) var<storage, read> transforms: array<Transform>;
 @group(0) @binding(1) var cubeSampler: sampler;
 @group(0) @binding(2) var cubeTexture: texture_2d<f32>;
+@group(0) @binding(3) var<uniform> uni: Uniform;
 
 @vertex fn vs(
     @builtin(instance_index) instanceIndex: u32,
     vert: Vertex) -> VSOut {
     let transform = transforms[instanceIndex];
     var vsOut: VSOut;
-    vsOut.position = transform.matrix * vert.position;
+    let modelViewProjection = uni.viewProjection * transform.matrix;
+    vsOut.position = modelViewProjection * vert.position;
     vsOut.texcoord = vert.texcoord;
     return vsOut;
 }
