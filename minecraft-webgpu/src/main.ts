@@ -10,7 +10,12 @@ interface ModelData {
 
 const deg2rad = (deg: number) => deg * Math.PI / 180;
 
-function generateChunkMesh(data: Uint8Array) {
+interface Chunk {
+  data: Mat4[],
+  numFaces: number;
+}
+
+function generateChunkMesh(data: Uint8Array): Chunk {
   const indexChunk = (x: number, y: number, z: number) => {
     if (x < 0 || x >= 32 || y < 0 || y >= 32 || z < 0 || z >= 32) return 0;
     return data[z * 1024 + y * 32 + x];
@@ -50,7 +55,10 @@ function generateChunkMesh(data: Uint8Array) {
     }
   }
 
-  return meshData;
+  return {
+    data: meshData,
+    numFaces: meshData.length
+  };
 }
 
 // Generate the data for a unit cube
@@ -222,16 +230,28 @@ async function main(): Promise<void> {
   });
   const uniformValues = new Float32Array(uniformBufferSize / 4);
 
-  const numObjects = 32768 * 6;
+  const voxelData = new Uint8Array(32768);
+  for (let i = 0; i < 32768; i++) {
+    voxelData[i] = Math.round(Math.random());
+  }
+  
+  const voxelMesh = generateChunkMesh(voxelData);
+
   const instanceUnitSize = (16) * 4;
-  const instanceBufferSize = instanceUnitSize * numObjects;
- 
+  const instanceBufferSize = instanceUnitSize * voxelMesh.numFaces;
+
   const instanceBuffer = device!.createBuffer({
     label: "Cube Instance Buffer",
     size: instanceBufferSize,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
   });
   const instanceValues = new Float32Array(instanceBufferSize / 4);
+
+  for (let i = 0; i < voxelMesh.numFaces; i++) {
+      const model = voxelMesh.data[i];
+      instanceValues.set(model, (instanceUnitSize / 4) * i);
+  }
+  device!.queue.writeBuffer(instanceBuffer, 0, instanceValues);
 
   const cubeData = createCubeData();
 
@@ -350,18 +370,6 @@ async function main(): Promise<void> {
     }
   });
 
-  const voxelData = new Uint8Array(32768);
-  for (let i = 0; i < 32768; i++) {
-    voxelData[i] = Math.round(Math.random());
-  }
-
-  const voxelMesh = generateChunkMesh(voxelData);
-  for (let i = 0; i < voxelMesh.length; i++) {
-      const model = voxelMesh[i];
-      instanceValues.set(model, (instanceUnitSize / 4) * i);
-  }
-  device!.queue.writeBuffer(instanceBuffer, 0, instanceValues);
-
   let depthTexture: GPUTexture | undefined;
   let multisampleTexture: GPUTexture | undefined;
 
@@ -436,7 +444,7 @@ async function main(): Promise<void> {
     pass.setVertexBuffer(0, vertexBuffer);
     pass.setIndexBuffer(indexBuffer, "uint16");
     pass.setBindGroup(0, bindGroup);
-    pass.drawIndexed(cubeData.numVertices, voxelMesh.length);
+    pass.drawIndexed(cubeData.numVertices, voxelMesh.numFaces);
     pass.end();
 
     const commandBuffer: GPUCommandBuffer = encoder.finish();
