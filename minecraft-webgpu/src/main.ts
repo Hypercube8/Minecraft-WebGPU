@@ -11,8 +11,77 @@ interface ModelData {
 const deg2rad = (deg: number) => deg * Math.PI / 180;
 
 interface Chunk {
-  data: Mat4[],
-  numFaces: number;
+  vertexData: Float32Array,
+  indexData: Uint32Array,
+  numVertices: number;
+}
+
+function generateFrontFace(x: number, y: number, z: number): number[] {
+  return [
+    //     Positions            UVs 
+    x+0.5,  y+0.5,  z+0.5,   1.0, 1.0,        
+    x-0.5,  y+0.5,  z+0.5,   0.0, 1.0,
+    x-0.5,  y-0.5,  z+0.5,   0.0, 0.0,   
+    x+0.5,  y-0.5,  z+0.5,   1.0, 0.0, 
+  ]
+}
+
+function generateBackFace(x: number, y: number, z: number): number[] {
+  return [
+    //     Positions          UVs 
+    x-0.5, y+0.5, z-0.5,   1.0, 1.0,
+    x+0.5, y+0.5, z-0.5,   0.0, 1.0,
+    x+0.5, y-0.5, z-0.5,   0.0, 0.0,
+    x-0.5, y-0.5, z-0.5,   1.0, 0.0,
+  ]
+}
+
+function generateTopFace(x: number, y: number, z: number): number[] {
+  return [
+    //     Positions          UVs 
+    x+0.5, y+0.5, z-0.5,   1.0, 1.0,   
+    x-0.5, y+0.5, z-0.5,   0.0, 1.0,   
+    x-0.5, y+0.5, z+0.5,   0.0, 0.0,
+    x+0.5, y+0.5, z+0.5,   1.0, 0.0,
+  ]
+}
+
+function generateBottomFace(x: number, y: number, z: number): number[] {
+  return [
+    //     Positions          UVs 
+    x-0.5, y-0.5, z-0.5,   1.0, 1.0,   
+    x+0.5, y-0.5, z-0.5,   0.0, 1.0,   
+    x+0.5, y-0.5, z+0.5,   0.0, 0.0,
+    x-0.5, y-0.5, z+0.5,   1.0, 0.0,
+  ]
+}
+
+function generateLeftFace(x: number, y: number, z: number): number[] {
+  return [
+    //     Positions          UVs 
+    x-0.5, y+0.5, z+0.5,   1.0, 1.0,   
+    x-0.5, y+0.5, z-0.5,   0.0, 1.0,   
+    x-0.5, y-0.5, z-0.5,   0.0, 0.0,
+    x-0.5, y-0.5, z+0.5,   1.0, 0.0,
+  ]
+}
+
+function generateRightFace(x: number, y: number, z: number): number[] {
+  return [
+    //     Positions          UVs 
+    x+0.5, y+0.5, z-0.5,   1.0, 1.0,   
+    x+0.5, y+0.5, z+0.5,   0.0, 1.0,   
+    x+0.5, y-0.5, z+0.5,   0.0, 0.0,
+    x+0.5, y-0.5, z-0.5,   1.0, 0.0,
+  ]
+}
+
+function generateFaceIndicies(faceID: number): number[] {
+  const fid = faceID * 4;
+  return [
+    fid+0, fid+1, fid+2, // Top tri
+    fid+2, fid+3, fid+0  // Bottom tri
+  ]
 }
 
 function generateChunkMesh(data: Uint8Array): Chunk {
@@ -21,13 +90,10 @@ function generateChunkMesh(data: Uint8Array): Chunk {
     return data[z * 1024 + y * 32 + x];
   }
 
-  const backMatrix = mat4.rotationY(deg2rad(180));
-  const upMatrix = mat4.rotationX(deg2rad(-90));
-  const downMatrix = mat4.rotationX(deg2rad(90));
-  const leftMatrix = mat4.rotationY(deg2rad(90));
-  const rightMatrix = mat4.rotationY(deg2rad(-90));
+  const vertexData: number[] = [];
+  const indexData: number[] = []
 
-  const meshData: Mat4[] = [];
+  let faceNum = 0;
 
   for (let x = 0; x < 32; x++) {
     for (let y = 0; y < 32; y++) {
@@ -36,28 +102,27 @@ function generateChunkMesh(data: Uint8Array): Chunk {
           continue;
         }
 
-        const positionMatrix = mat4.translation([x, y, z]);
-
         const frontNeighbor = indexChunk(x, y, z+1);
         const backNeighbor = indexChunk(x, y, z-1);
         const upNeighbor = indexChunk(x, y+1, z);
         const downNeighbor = indexChunk(x, y-1, z);
-        const leftNeighbor = indexChunk(x+1, y, z);
-        const rightNeighbor = indexChunk(x-1, y, z);
+        const leftNeighbor = indexChunk(x-1, y, z);
+        const rightNeighbor = indexChunk(x+1, y, z);
 
-        if (!frontNeighbor) { meshData.push(positionMatrix); }
-        if (!backNeighbor) { meshData.push(mat4.multiply(positionMatrix, backMatrix)); }
-        if (!upNeighbor) { meshData.push(mat4.multiply(positionMatrix, upMatrix)); }
-        if (!downNeighbor) { meshData.push(mat4.multiply(positionMatrix, downMatrix)); }
-        if (!leftNeighbor) { meshData.push(mat4.multiply(positionMatrix, leftMatrix)); }
-        if (!rightNeighbor) { meshData.push(mat4.multiply(positionMatrix, rightMatrix)); }
+        if (!frontNeighbor) { vertexData.push(...generateFrontFace(x, y, z)); indexData.push(...generateFaceIndicies(faceNum++)); }
+        if (!backNeighbor) { vertexData.push(...generateBackFace(x, y, z)); indexData.push(...generateFaceIndicies(faceNum++)); }
+        if (!upNeighbor) { vertexData.push(...generateTopFace(x, y, z)); indexData.push(...generateFaceIndicies(faceNum++)); }
+        if (!downNeighbor) { vertexData.push(...generateBottomFace(x, y, z)); indexData.push(...generateFaceIndicies(faceNum++)); }
+        if (!leftNeighbor) { vertexData.push(...generateLeftFace(x, y, z)); indexData.push(...generateFaceIndicies(faceNum++)); }
+        if (!rightNeighbor) { vertexData.push(...generateRightFace(x, y, z)); indexData.push(...generateFaceIndicies(faceNum++)); }
       }
     }
   }
 
   return {
-    data: meshData,
-    numFaces: meshData.length
+    vertexData: new Float32Array(vertexData),
+    indexData: new Uint32Array(indexData),
+    numVertices: indexData.length
   };
 }
 
@@ -237,46 +302,27 @@ async function main(): Promise<void> {
   
   const voxelMesh = generateChunkMesh(voxelData);
 
-  const instanceUnitSize = (16) * 4;
-  const instanceBufferSize = instanceUnitSize * voxelMesh.numFaces;
-
-  const instanceBuffer = device!.createBuffer({
-    label: "Cube Instance Buffer",
-    size: instanceBufferSize,
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
-  });
-  const instanceValues = new Float32Array(instanceBufferSize / 4);
-
-  for (let i = 0; i < voxelMesh.numFaces; i++) {
-      const model = voxelMesh.data[i];
-      instanceValues.set(model, (instanceUnitSize / 4) * i);
-  }
-  device!.queue.writeBuffer(instanceBuffer, 0, instanceValues);
-
-  const cubeData = createCubeData();
-
   const vertexBuffer = device!.createBuffer({
     label: "Cube Vertex Buffer",
-    size: cubeData.vertexData.byteLength,
+    size: voxelMesh.vertexData.byteLength,
     usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
   });
-  device!.queue.writeBuffer(vertexBuffer, 0, cubeData.vertexData);
+  device!.queue.writeBuffer(vertexBuffer, 0, voxelMesh.vertexData);
 
   const indexBuffer = device!.createBuffer({
     label: "Cube Index Buffer",
-    size: cubeData.indexData.byteLength,
+    size: voxelMesh.indexData.byteLength,
     usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST
   });
-  device!.queue.writeBuffer(indexBuffer, 0, cubeData.indexData);
+  device!.queue.writeBuffer(indexBuffer, 0, voxelMesh.indexData);
 
   const bindGroup = device!.createBindGroup({
     label: "Cube Bind Group",
     layout: pipeline.getBindGroupLayout(0),
     entries: [
-      { binding: 0, resource: { buffer: instanceBuffer }},
-      { binding: 1, resource: sampler },
-      { binding: 2, resource: texture.createView() },
-      { binding: 3, resource: { buffer: uniformBuffer }}
+      { binding: 0, resource: sampler },
+      { binding: 1, resource: texture.createView() },
+      { binding: 2, resource: { buffer: uniformBuffer }}
     ]
   });
 
@@ -442,9 +488,9 @@ async function main(): Promise<void> {
 
     pass.setPipeline(pipeline);
     pass.setVertexBuffer(0, vertexBuffer);
-    pass.setIndexBuffer(indexBuffer, "uint16");
+    pass.setIndexBuffer(indexBuffer, "uint32");
     pass.setBindGroup(0, bindGroup);
-    pass.drawIndexed(cubeData.numVertices, voxelMesh.numFaces);
+    pass.drawIndexed(voxelMesh.numVertices);
     pass.end();
 
     const commandBuffer: GPUCommandBuffer = encoder.finish();
