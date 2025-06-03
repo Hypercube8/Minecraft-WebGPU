@@ -1,5 +1,5 @@
-struct Uniforms {
-    matrix: mat4x4f
+struct Uniform {
+    viewProjection: mat4x4f
 }
 
 struct Vertex {
@@ -12,13 +12,13 @@ struct VSOut {
     @location(0) texcoord: vec2f
 }
 
-@group(0) @binding(0) var<uniform> uni: Uniforms;
-@group(0) @binding(1) var cubeSampler: sampler;
-@group(0) @binding(2) var cubeTexture: texture_2d<f32>;
+@group(0) @binding(0) var cubeSampler: sampler;
+@group(0) @binding(1) var cubeTexture: texture_2d<f32>;
+@group(0) @binding(2) var<uniform> uni: Uniform;
 
 @vertex fn vs(vert: Vertex) -> VSOut {
     var vsOut: VSOut;
-    vsOut.position = uni.matrix * vert.position;
+    vsOut.position = uni.viewProjection * vert.position;
     vsOut.texcoord = vert.texcoord;
     return vsOut;
 }
